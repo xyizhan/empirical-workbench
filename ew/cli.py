@@ -35,6 +35,20 @@ def report(out, quiet=False):
     log=json.loads((out/'run.json').read_text())
     if log['status']!='passed':
         raise ValueError('Only verified runs can render a report')
+    if '延误定义' in log.get('decisions', {}) and (out/'探索对照.csv').exists():
+        from .olist_report import manuscript
+        source = manuscript(out, log)
+    else:
+        source = tabular_report(out, log)
+    (out/'report.qmd').write_text(source, encoding='utf-8')
+    binary=shutil.which(os.environ.get('QUARTO_BIN','quarto'))
+    if not binary:
+        sys.exit('生成报告需要 Quarto CLI。请安装或设置 QUARTO_BIN 指向可执行文件。')
+    with (out/'quarto.log').open('w') as stream:
+        subprocess.run([str(Path(binary).resolve()),'render','report.qmd'],cwd=out,check=True,stdout=stream if quiet else None,stderr=subprocess.STDOUT if quiet else None)
+
+
+def tabular_report(out, log):
     lines=['---','title: "Empirical Workbench · 研究报告"','format:','  html:','    embed-resources: true','---','',log.get('question',''), '']
     for path in sorted(out.glob('*.csv')):
         with path.open(newline='') as stream:
@@ -45,12 +59,7 @@ def report(out, quiet=False):
             rows.insert(1,['---']*len(rows[0]))
             lines.extend('| '+' | '.join(x.replace('|','\\|').replace('\n',' ') for x in row)+' |' for row in rows)
             lines.append('')
-    (out/'report.qmd').write_text('\n'.join(lines))
-    binary=shutil.which(os.environ.get('QUARTO_BIN','quarto'))
-    if not binary:
-        sys.exit('生成报告需要 Quarto CLI。请安装或设置 QUARTO_BIN 指向可执行文件。')
-    with (out/'quarto.log').open('w') as stream:
-        subprocess.run([str(Path(binary).resolve()),'render','report.qmd'],cwd=out,check=True,stdout=stream if quiet else None,stderr=subprocess.STDOUT if quiet else None)
+    return '\n'.join(lines)
 
 
 def prompt_decision(name, decision, out):
