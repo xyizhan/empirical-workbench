@@ -77,6 +77,24 @@
       },
       "exports": {
         "结构.csv": "select 'orders' source,count(*) source_rows,count(distinct order_id) orders from orders union all select 'items' source,count(*) source_rows,count(distinct order_id) orders from items union all select 'payments' source,count(*) source_rows,count(distinct order_id) orders from payments union all select 'reviews' source,count(*) source_rows,count(distinct order_id) orders from reviews"
+      },
+      "classroom": {
+        "done": [
+          {
+            "title": "四张表如何对应一笔订单？",
+            "body": "共同匹配字段　order_id\n目标粒度　一行一单。同一订单在明细表可以出现多次。",
+            "tables": [
+              {
+                "sql": "select '订单' 来源关系,'一笔订单' 每行代表,count(*) 原表行数,count(distinct order_id) 覆盖订单 from orders union all select '├ 商品' 来源关系,'一条商品明细' 每行代表,count(*) 原表行数,count(distinct order_id) 覆盖订单 from items union all select '├ 支付' 来源关系,'一次支付' 每行代表,count(*) 原表行数,count(distinct order_id) 覆盖订单 from payments union all select '└ 评价' 来源关系,'一条评价' 每行代表,count(*) 原表行数,count(distinct order_id) 覆盖订单 from reviews"
+              },
+              {
+                "sql": "select order_id 订单号,count(*) 支付次数 from payments group by order_id having count(*)>1 limit 3",
+                "detail": true
+              }
+            ],
+            "next": "尝试连接"
+          }
+        ]
       }
     },
     {
@@ -112,7 +130,37 @@
             "create table base as select o.*,item_n,item_cents,freight_cents,payment_n,paid_cents,review_n,score from orders o left join it using(order_id) left join pay using(order_id) left join rev using(order_id)"
           ]
         }
-      ]
+      ],
+      "classroom": {
+        "rejected": [
+          {
+            "title": "× 合并失败 · 一笔订单被展开",
+            "body": "两件商品分别匹配两次支付。按 E 检查同一笔支付出现在哪两行。",
+            "tables": [
+              {
+                "sql": "with chosen as (select order_id from base where item_n=2 and payment_n=2 group by order_id having count(*)>1 order by order_id limit 1), pairs as (select i.order_id,i.order_item_id item,p.payment_sequential seq,p.payment_value amount from chosen join items i using(order_id) join payments p using(order_id)) select order_id 触发问题的订单,count(*) 连接行数,(select round(paid_cents/100.0,2) from pay where order_id=pairs.order_id) 原支付额,round(sum(amount),2) 展开后合计 from pairs group by order_id"
+              },
+              {
+                "sql": "with chosen as (select order_id from base where item_n=2 and payment_n=2 group by order_id having count(*)>1 order by order_id limit 1), pairs as (select i.order_id,i.order_item_id item,p.payment_sequential seq,p.payment_value amount from chosen join items i using(order_id) join payments p using(order_id)) select item 商品序号,seq 支付序号,amount 支付金额 from pairs order by item,seq",
+                "detail": true
+              }
+            ],
+            "next": "回滚并执行分表汇总"
+          }
+        ],
+        "done": [
+          {
+            "title": "✓ 先汇总，再连接",
+            "body": "分别将商品、支付、评价汇总到订单粒度，再与订单主表左连接。",
+            "tables": [
+              {
+                "sql": "select count(*) 合并行数,count(distinct order_id) 不同订单数,sum(paid_cents)-(select sum(cast(round(payment_value*100) as integer)) from payments) 支付差额_分 from base"
+              }
+            ],
+            "next": "检查字段适用条件"
+          }
+        ]
+      }
     },
     {
       "name": "3 质量标记",
@@ -126,6 +174,24 @@
       },
       "exports": {
         "质量处置.csv": "select quality,count(*) n,min(order_id) example from quality group by quality"
+      },
+      "classroom": {
+        "done": [
+          {
+            "title": "缺少签收时间，影响哪些指标？",
+            "body": "已送达却缺签收的记录保留在全表，计算履约时长时排除。",
+            "tables": [
+              {
+                "sql": "select case when order_status='delivered' then '已送达' else '其他状态' end 状态,count(*) 订单数,sum(order_delivered_customer_date is null) 缺签收 from quality group by 1"
+              },
+              {
+                "sql": "select order_id 订单号,order_status 状态,order_delivered_customer_date 签收 from quality where quality='missing_actual' limit 3",
+                "detail": true
+              }
+            ],
+            "next": "构造变量与样本"
+          }
+        ]
       }
     },
     {
@@ -138,7 +204,25 @@
         "口径比较.csv": "select sum(rated) denominator,sum(late_day) late_day_n,sum(late_clock) late_clock_n,sum(late_day!=late_clock) switched,min(case when late_day!=late_clock then order_id end) example from candidates where rated",
         "样本筛选.csv": "select count(*) all_orders,sum(order_status='delivered') delivered,sum(quality='eligible') fulfillment,sum(rated) rated from candidates"
       },
-      "decision": "延误定义"
+      "decision": "延误定义",
+      "classroom": {
+        "done": [
+          {
+            "title": "哪些订单可以比较评分？",
+            "body": "每行沿用上一步保留的订单。按 E 查看同一天签收的边界单。",
+            "tables": [
+              {
+                "sql": "with n as (select count(*) a,sum(order_status='delivered') b,sum(quality='eligible') c,sum(rated) d from candidates) select '① 所有订单' 筛选步骤,a 保留订单,0 本步排除 from n union all select '  ② 已送达',b,a-b from n union all select '    ③ 可计算履约',c,b-c from n union all select '      ④ 有评分',d,c-d from n"
+              },
+              {
+                "sql": "select order_id 订单号,order_estimated_delivery_date 预计,order_delivered_customer_date 签收 from candidates where rated and late_day!=late_clock order by order_id limit 1",
+                "detail": true
+              }
+            ],
+            "next": "进入研究者口径选择"
+          }
+        ]
+      }
     },
     {
       "name": "5 描述统计与探索",
@@ -157,6 +241,34 @@
         "评分分布.csv": "select late,score,count(*) n from analysis where rated group by late,score order by late,score",
         "边界记录.csv": "select order_id,order_delivered_customer_date,order_estimated_delivery_date,late_day,late_clock,score,late from analysis where rated and late_day!=late_clock order by order_id limit 3",
         "探索对照.csv": "select branch,late,count(*) n,avg(score) mean_score from branches group by branch,late order by branch,late"
+      },
+      "classroom": {
+        "done": [
+          {
+            "title": "差距缩小，变的是样本还是评分？",
+            "body": "A 与 C 同时改变了订单范围和评分定义。下一屏固定 B、C 的订单集合。",
+            "tables": [
+              {
+                "sql": "with g as (select branch,sum(late=0) ontime,sum(late=1) late_n,avg(case when late=0 then score end)-avg(case when late=1 then score end) gap from branches group by branch) select case branch when 'A' then 'A 全部订单评分样本' when 'B' then 'B 固定送达后有评价样本' else 'C 同样本仅取送达后评分' end 比较,ontime 准时订单,late_n 晚送订单,round(gap,3) 均分差,substr('████████████████████████████████████████',1,round(abs(gap)*8)) 差距 from g where branch in ('A','C') order by branch"
+              }
+            ],
+            "next": "揭示固定样本对照"
+          },
+          {
+            "title": "固定样本后，评分口径改变了多少？",
+            "body": "先沿 A → B 看筛选样本的变化，再沿 B → C 看同批订单换评分的变化。",
+            "tables": [
+              {
+                "sql": "with g as (select branch,sum(late=0) ontime,sum(late=1) late_n,avg(case when late=0 then score end)-avg(case when late=1 then score end) gap from branches group by branch) select case branch when 'A' then 'A 全部订单评分样本' when 'B' then 'B 固定送达后有评价样本' else 'C 同样本仅取送达后评分' end 比较,ontime 准时订单,late_n 晚送订单,round(gap,3) 均分差,substr('████████████████████████████████████████',1,round(abs(gap)*8)) 差距 from g where branch in ('A','B','C') order by branch"
+              },
+              {
+                "sql": "select count(*) as B与C成员不一致订单数 from (select order_id from branches where branch in ('B','C') group by order_id having count(distinct branch)!=2)",
+                "detail": true
+              }
+            ],
+            "next": "运行独立复算工具"
+          }
+        ]
       }
     }
   ],

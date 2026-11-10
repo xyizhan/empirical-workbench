@@ -17,7 +17,15 @@ ew view runs/panel
 
 内置八行企业面板检验复合键、年度断档和零基期。两条可计算增长率分别为 +10%、−20%。终端控制台按 1/2/3 切换执行轨迹、数据核验和探索底表，按 q 退出。可用 ew view RUN --web 打开网页视图，每次运行均可离线回看。
 
-## 课堂现场运行
+## 课堂投影模式
+
+在终端运行 `./demo-olist`。启动器自动建立新运行目录；也可用 `ew demo studies/olist/study.json --raw raw --out runs/talk --report`。终端建议至少 90 列、28 行。空格推进，E 展开现场查询的源行，L 展开 SQL，Q 结束；进入研究决策时输入编号后按回车。
+
+五个阶段持续显示在页首。课堂会停在四表粒度、明细连接反例、修复后对账、缺失处置、样本筛选和评分差对照。反例页在回滚前读取当前数据库；研究者选定的口径实际参与后续运算。Quarto 的渲染日志写入运行目录的 quarto.log。自定义来源用 OLIST_RAW，Quarto 可执行文件用 QUARTO_BIN。
+
+研究配置可在每个阶段添加 classroom.done 或 classroom.rejected 页面。页面声明 title、body、next 以及 tables 中的只读证据查询；detail=true 的表在 E 视图展开。展示证据随运行记录保存到 events.jsonl。
+
+## 连续执行模式
 
 在工程根目录启动，raw 指向解压后的 Olist CSV。每次使用新的输出目录。
 

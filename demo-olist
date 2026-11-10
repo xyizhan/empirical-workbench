@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")"
+if [ -z "${QUARTO_BIN:-}" ] && [ -x ../tmp/quarto_trial/bin/quarto ]; then
+    QUARTO_BIN="$(cd ../tmp/quarto_trial/bin && pwd)/quarto"
+    export QUARTO_BIN
+fi
+ew_cmd=ew
+if [ -x .venv/bin/ew ]; then ew_cmd=.venv/bin/ew; fi
+raw=${OLIST_RAW:-raw}
+if [ ! -d "$raw" ] && [ -z "${OLIST_RAW:-}" ]; then raw=../data/raw; fi
+exec "$ew_cmd" demo studies/olist/study.json --raw "$raw" --out "runs/class-$(date +%Y%m%d-%H%M%S)-$$" --report

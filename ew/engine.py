@@ -38,7 +38,7 @@ def load_inputs(db, spec, raw, log, emit):
         emit('已读取', f"{table} · {log['sources'][table]['rows']:,} 行")
 
 
-def run(args, emit=lambda kind, message: None, choose=None):
+def run(args, emit=lambda kind, message: None, choose=None, checkpoint=None):
     spec = json.loads(args.study.read_text())
     out = args.out
     out.mkdir(parents=True, exist_ok=False)
@@ -67,6 +67,8 @@ def run(args, emit=lambda kind, message: None, choose=None):
                             raise ValueError(f'{name}: {invalid}')
                         emit('通过', name)
                 except (ValueError, sqlite3.Error) as exc:
+                    if checkpoint:
+                        checkpoint(db, stage, 'rejected', exc)
                     db.execute('ROLLBACK TO candidate')
                     db.execute('RELEASE candidate')
                     emit('已回滚', f"{plan['name']} · {exc}")
@@ -87,6 +89,8 @@ def run(args, emit=lambda kind, message: None, choose=None):
                     writer = csv.writer(stream)
                     writer.writerow([col[0] for col in cursor.description])
                     writer.writerows(cursor)
+            if checkpoint:
+                checkpoint(db, stage, 'done')
             if 'decision' in stage:
                 name = stage['decision']
                 value = spec['decisions'][name]['value']

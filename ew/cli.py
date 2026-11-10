@@ -31,7 +31,7 @@ def dashboard(out):
     (out/'index.html').write_text(template.replace('__PAYLOAD__',payload))
 
 
-def report(out):
+def report(out, quiet=False):
     log=json.loads((out/'run.json').read_text())
     if log['status']!='passed':
         raise ValueError('Only verified runs can render a report')
@@ -49,7 +49,8 @@ def report(out):
     binary=shutil.which(os.environ.get('QUARTO_BIN','quarto'))
     if not binary:
         sys.exit('生成报告需要 Quarto CLI。请安装或设置 QUARTO_BIN 指向可执行文件。')
-    subprocess.run([str(Path(binary).resolve()),'render','report.qmd'],cwd=out,check=True)
+    with (out/'quarto.log').open('w') as stream:
+        subprocess.run([str(Path(binary).resolve()),'render','report.qmd'],cwd=out,check=True,stdout=stream if quiet else None,stderr=subprocess.STDOUT if quiet else None)
 
 
 def prompt_decision(name, decision, out):
@@ -79,7 +80,7 @@ def main():
     cmds=parser.add_subparsers(dest='cmd',required=True)
     inspect=cmds.add_parser('inspect')
     inspect.add_argument('raw',type=Path)
-    run=cmds.add_parser('run')
+    run=cmds.add_parser('run', aliases=['demo'])
     run.add_argument('study',type=Path)
     run.add_argument('--raw',required=True,type=Path)
     run.add_argument('--out',required=True,type=Path)
@@ -129,6 +130,9 @@ def main():
         explicit.add(key)
         spec['decisions'][key]['value']=value or None
         spec['decisions'][key]['source']='command-line'
+    classroom = args.cmd=='demo'
+    if classroom and not (sys.stdin.isatty() and sys.stdout.isatty()):
+        parser.error('ew demo 需要交互终端；自动化请使用 ew run --batch')
     out.mkdir(parents=True,exist_ok=False)
     snapshot=out/'study.json'
     save(snapshot,spec)
@@ -138,17 +142,26 @@ def main():
     def emit(kind, message):
         with (out/'events.jsonl').open('a', encoding='utf-8') as stream:
             stream.write(json.dumps({'event':kind,'message':message},ensure_ascii=False)+'\n')
-        if interactive:
+        if presenter:
+            presenter.event(kind,message)
+        elif interactive:
             if kind=='SQLite' and len(message)>108:
                 message=message[:105]+'…'
             print(f'[{kind}] {message}', flush=True)
+    presenter=None
+    if classroom:
+        from .demo import Classroom
+        presenter=Classroom(spec,emit)
+        interactive=True
     def choose(name, decision, directory):
         if interactive and name not in explicit:
             return prompt_decision(name, decision, directory)
         return decision['value']
     try:
+        if presenter:
+            presenter.intro()
         emit('研究问题', spec.get('question',study.stem))
-        engine.run(SimpleNamespace(study=snapshot,out=work,raw=args.raw),emit,choose)
+        engine.run(SimpleNamespace(study=snapshot,out=work,raw=args.raw),emit,choose,presenter.checkpoint if presenter else None)
         ctx=dict(python=sys.executable,study=str(study.parent),raw=str(args.raw.resolve()),out=str(work))
         for name,argv in spec.get('tools',{}).items():
             command=[part.format_map(ctx) for part in argv]
@@ -171,7 +184,7 @@ def main():
     if error: sys.exit(error)
     if args.report:
         emit('调用工具', 'Quarto · render report.qmd')
-        report(out)
+        report(out, quiet=classroom)
         emit('报告完成',str(out/'report.html'))
 
 if __name__=='__main__':
