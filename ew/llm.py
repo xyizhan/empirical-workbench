@@ -3,7 +3,7 @@
 Configuration comes from the environment only (keys are never written to disk):
   EW_LLM_API_KEY   API key (falls back to DEEPSEEK_API_KEY, then OPENAI_API_KEY)
   EW_LLM_BASE_URL  default https://api.deepseek.com  (e.g. https://api.openai.com/v1, http://localhost:11434/v1)
-  EW_LLM_MODEL     default deepseek-v4-pro
+  EW_LLM_MODEL     default deepseek-flash (faster; deepseek-v4-pro for harder data)
 """
 import http.client
 import json
@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 
 DEFAULT_BASE_URL = 'https://api.deepseek.com'
-DEFAULT_MODEL = 'deepseek-v4-pro'
+DEFAULT_MODEL = 'deepseek-flash'
 
 
 class LLMError(RuntimeError):

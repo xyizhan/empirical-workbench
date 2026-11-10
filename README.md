@@ -113,7 +113,7 @@ Olist 数据：[Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle
 |---|---|---|
 | `EW_LLM_API_KEY` | — | 也可用 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY` |
 | `EW_LLM_BASE_URL` | `https://api.deepseek.com` | 例如 `https://api.openai.com/v1`、`http://localhost:11434/v1` |
-| `EW_LLM_MODEL` | `deepseek-v4-pro` | 需支持 function calling |
+| `EW_LLM_MODEL` | `deepseek-flash` | 需支持 function calling；数据复杂时可换 `deepseek-v4-pro`（更强但更慢） |
 
 模型只能通过工作台提供的工具操作数据：查询是只读的，写入的配置会先经过校验，选题卡的确认只能来自你在终端的输入。
 
