@@ -262,6 +262,11 @@ def main(argv=None):
     mode.add_argument('--batch', dest='interactive', action='store_false')
     run.set_defaults(interactive=None)
     run.add_argument('--report', action='store_true', help='核验后生成报告（需要 Quarto）')
+    serve = cmds.add_parser('serve', help='启动本地网页工作台')
+    serve.add_argument('--runs', type=Path, default=Path('runs'), help='运行目录（默认 runs）')
+    serve.add_argument('--studies', type=Path, default=Path('studies'), help='研究配置目录（默认 studies）')
+    serve.add_argument('--port', type=int, default=8765)
+    serve.add_argument('--open', action='store_true', help='启动后打开浏览器')
     view = cmds.add_parser('view', help='查看一次运行')
     view.add_argument('out', type=Path)
     view.add_argument('--web', action='store_true')
@@ -273,6 +278,9 @@ def main(argv=None):
     try:
         if args.cmd == 'inspect':
             cmd_inspect(args)
+        elif args.cmd == 'serve':
+            from .server import serve as start_server
+            start_server(args.runs, args.studies, args.port, args.open)
         elif args.cmd == 'query':
             cmd_query(args)
         elif args.cmd == 'validate':

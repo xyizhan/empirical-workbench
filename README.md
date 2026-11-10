@@ -15,6 +15,18 @@ ew run studies/panel/study.json --raw studies/panel --out runs/panel
 ew view runs/panel
 ```
 
+## 网页工作台
+
+```sh
+ew serve --open
+```
+
+在浏览器打开本地工作台（仅监听 127.0.0.1）。左侧是 runs/ 中的全部运行记录；「新建运行」选择 studies/ 中的研究、填写原始数据目录、为每个研究口径选定取值，或选择「运行到这里先暂停，看过证据再决定」。运行中页面实时显示各阶段状态与事件；暂停时页面列出口径证据，点选后以该口径在新目录重跑。每次运行可查看各阶段的候选方案、回滚原因、核验违规样例、数据表行数变化、导出文件预览与下载，在「查询」中对工作数据库执行只读 SQL，并生成或打开报告。`--runs`、`--studies`、`--port` 可改目录与端口。
+
+前端源码在 frontend/（Vite + Preact），构建结果随 Python 包发布在 ew/web/，使用者无需安装 Node。修改前端后在 frontend/ 运行 `npm install && npm run build`；开发时 `npm run dev` 会把 /api 代理到 `ew serve` 的 8765 端口。
+
+## 命令行
+
 内置八行企业面板检验复合键、年度断档和零基期。两条可计算增长率分别为 +10%、−20%。终端控制台按 1/2/3 切换执行轨迹、数据核验和探索底表，按 q 退出。可用 ew view RUN --web 打开网页视图，每次运行均可离线回看。
 
 ## 课堂投影模式
