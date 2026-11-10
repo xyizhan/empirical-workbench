@@ -2,6 +2,9 @@ import { Easing, interpolate, spring } from 'remotion';
 
 export const FPS = 30;
 
+/** Animation speed inside scenes (1 = original); lower is slower and easier to follow. */
+export const SLOW = 0.7;
+
 export const C = {
   bg: '#060a13',
   panel: 'rgba(17, 24, 39, 0.82)',

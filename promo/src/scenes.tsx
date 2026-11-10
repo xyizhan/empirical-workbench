@@ -1,6 +1,6 @@
 import React from 'react';
-import { AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
-import { Chip, Count, Glass, Headline, Mono } from './parts';
+import { AbsoluteFill, Img, interpolate, staticFile, useVideoConfig } from 'remotion';
+import { Chip, Count, Glass, Headline, Mono, useT } from './parts';
 import { C, MONO, SANS, pop, prog, typed } from './theme';
 
 /* ---------- 1. Hook: a pile of unfamiliar fields ---------- */
@@ -9,9 +9,9 @@ const FIELDS = ['order_id', 'customer_unique_id', 'order_purchase_timestamp', 'r
   'review_answer_timestamp', 'customer_state', 'price', 'product_category_name', 'order_status', 'seller_id', 'payment_type', 'review_id'];
 
 export const Hook: React.FC = () => {
-  const f = useCurrentFrame();
+  const f = useT();
   const { fps } = useVideoConfig();
-  const gather = prog(f, 56, 80);
+  const gather = prog(f, 82, 102);
   const a = pop(f, fps, 6);
   const b = pop(f, fps, 24);
   return (
@@ -68,7 +68,7 @@ const MESSAGES = [
 ];
 
 export const Understand: React.FC = () => {
-  const f = useCurrentFrame();
+  const f = useT();
   const { fps } = useVideoConfig();
   const zoom = interpolate(f, [0, 110], [1.04, 1]);
   return (
@@ -120,14 +120,14 @@ export const Understand: React.FC = () => {
           研究助理 · ew chat
         </div>
         {MESSAGES.map((m, i) => {
-          const start = 14 + i * 17;
+          const start = 14 + i * 26;
           const s = pop(f, fps, start, 18);
           if (f < start) return null;
           return (
             <div key={i} style={{ marginBottom: 16, opacity: s, transform: `translateY(${(1 - s) * 20}px)`, fontSize: m.tool ? 20 : 25, lineHeight: 1.5,
               fontFamily: m.tool ? MONO : SANS, color: m.tool ? C.cyan : m.warn ? C.amber : C.text,
               padding: m.tool ? 0 : '12px 18px', borderRadius: 14, background: m.tool ? 'none' : 'rgba(79,140,255,0.10)', borderLeft: m.tool ? 'none' : `3px solid ${m.warn ? C.amber : C.blue}` }}>
-              {typed(m.text, f, start, 60)}
+              {typed(m.text, f, start, 34)}
             </div>
           );
         })}
@@ -148,7 +148,7 @@ const ROWS = [
 const FLAGS: Record<number, [string, string]> = { 1: ['缺签收日期', C.amber], 2: ['未成交', C.violet], 3: ['晚于预计', C.red], 4: ['无评价', C.cyan], 5: ['晚于预计', C.red] };
 
 export const Base: React.FC = () => {
-  const f = useCurrentFrame();
+  const f = useT();
   const { fps } = useVideoConfig();
   const shot = prog(f, 44, 70);
   const ring = prog(f, 66, 86);
@@ -207,7 +207,7 @@ const TOPICS = [
 ];
 
 export const Topics: React.FC = () => {
-  const f = useCurrentFrame();
+  const f = useT();
   const { fps } = useVideoConfig();
   const base = pop(f, fps, 2);
   return (
@@ -259,10 +259,10 @@ const CARD = [
 ];
 
 export const Card: React.FC = () => {
-  const f = useCurrentFrame();
+  const f = useT();
   const { fps } = useVideoConfig();
-  const stamp = pop(f, fps, 58, 9);
-  const answer = f >= 50 ? 'y' : '';
+  const stamp = pop(f, fps, 86, 9);
+  const answer = f >= 76 ? 'y' : '';
   return (
     <AbsoluteFill>
       <Headline kicker="04 · 研究者拍板" title="选题卡，由你确认" accent={C.amber} />
@@ -287,15 +287,15 @@ export const Card: React.FC = () => {
         border: `6px solid ${C.green}`, color: C.green, borderRadius: 18, padding: '14px 28px', fontSize: 44, fontWeight: 900, fontFamily: SANS, background: 'rgba(6,10,19,0.85)', letterSpacing: '0.08em' }}>
         ✓ 研究者已确认
       </div>
-      <div style={{ position: 'absolute', left: 420, top: 965, fontSize: 26, color: C.sub, opacity: prog(f, 60, 72) }}>未经你确认，助理不会构造任何变量</div>
+      <div style={{ position: 'absolute', left: 420, top: 965, fontSize: 26, color: C.sub, opacity: prog(f, 90, 102) }}>未经你确认，助理不会构造任何变量</div>
     </AbsoluteFill>
   );
 };
 
 /* ---------- 6. Research definitions: the researcher decides ---------- */
 export const Decision: React.FC = () => {
-  const f = useCurrentFrame();
-  const flip = prog(f, 34, 46);
+  const f = useT();
+  const flip = prog(f, 56, 72);
   const late = interpolate(flip, [0, 1], [6381, 7661]);
   return (
     <AbsoluteFill>
@@ -324,7 +324,7 @@ export const Decision: React.FC = () => {
         <div style={{ height: 16, borderRadius: 8, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
           <div style={{ height: '100%', width: `${(late / 95824) * 100 * 8}%`, background: `linear-gradient(90deg, ${C.amber}, ${C.red})`, borderRadius: 8 }} />
         </div>
-        <div style={{ marginTop: 22, opacity: prog(f, 48, 60) }}><Chip color={C.red}>⇄ 1,280 单会因定义不同而换组</Chip></div>
+        <div style={{ marginTop: 22, opacity: prog(f, 76, 88) }}><Chip color={C.red}>⇄ 1,280 单会因定义不同而换组</Chip></div>
       </Glass>
     </AbsoluteFill>
   );
@@ -332,7 +332,7 @@ export const Decision: React.FC = () => {
 
 /* ---------- 7. Result, and everything can be traced back ---------- */
 export const Result: React.FC = () => {
-  const f = useCurrentFrame();
+  const f = useT();
   const { fps } = useVideoConfig();
   const q = prog(f, 26, 50);
   return (
@@ -371,7 +371,7 @@ export const Result: React.FC = () => {
 
 /* ---------- 8. Outro ---------- */
 export const Outro: React.FC = () => {
-  const f = useCurrentFrame();
+  const f = useT();
   const { fps } = useVideoConfig();
   const word = 'Empirical Workbench';
   const cmd = '$ ew chat 我的项目 --raw 原始数据';

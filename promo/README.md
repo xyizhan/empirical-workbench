@@ -1,6 +1,6 @@
 # 宣传片
 
-用 [Remotion](https://www.remotion.dev/) 以代码编写的 21 秒宣传片，1920×1080 / 30fps。场景在 `src/scenes.tsx`，配色与动效参数在 `src/theme.ts`，`public/` 是网页工作台的真实界面截图（Olist 数据）。
+用 [Remotion](https://www.remotion.dev/) 以代码编写的 48 秒宣传片，1920×1080 / 30fps。场景在 `src/scenes.tsx`，配色与动效参数在 `src/theme.ts`，`public/` 是网页工作台的真实界面截图（Olist 数据）。
 
 ```sh
 npm install

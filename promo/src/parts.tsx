@@ -1,6 +1,9 @@
 import React from 'react';
 import { AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
-import { C, MONO, SANS, fmt, pop, prog } from './theme';
+import { C, MONO, SANS, SLOW, fmt, pop, prog } from './theme';
+
+/** Scene time, slowed down so viewers can follow the motion. */
+export const useT = () => useCurrentFrame() * SLOW;
 
 /** Persistent backdrop: drifting light fields, a perspective grid and slow particles. */
 export const Backdrop: React.FC = () => {
@@ -31,7 +34,7 @@ export const Backdrop: React.FC = () => {
 export const Headline: React.FC<{ kicker: string; title: string; accent?: string; x?: number; y?: number; size?: number; delay?: number }> = ({
   kicker, title, accent = C.blue, x = 120, y = 92, size = 68, delay = 0,
 }) => {
-  const f = useCurrentFrame();
+  const f = useT();
   const { fps } = useVideoConfig();
   const k = prog(f, delay, delay + 14);
   const chars = Array.from(title);
@@ -63,7 +66,7 @@ export const Glass: React.FC<{ style?: React.CSSProperties; children?: React.Rea
 export const Count: React.FC<{ to: number; from?: number; start: number; dur?: number; style?: React.CSSProperties; decimals?: number; suffix?: string }> = ({
   to, from = 0, start, dur = 24, style, decimals = 0, suffix = '',
 }) => {
-  const f = useCurrentFrame();
+  const f = useT();
   const v = interpolate(prog(f, start, start + dur), [0, 1], [from, to]);
   return <span style={{ fontVariantNumeric: 'tabular-nums', ...style }}>{decimals ? v.toFixed(decimals) : fmt(v)}{suffix}</span>;
 };

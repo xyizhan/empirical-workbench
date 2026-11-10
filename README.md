@@ -9,7 +9,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 <p align="center"><img src="docs/assets/demo.gif" alt="Empirical Workbench 演示" width="860"></p>
-<p align="center"><a href="docs/assets/demo.mp4">▶ 观看高清宣传片（21 秒，1080p）</a></p>
+<p align="center"><a href="docs/assets/demo.mp4">▶ 观看高清宣传片（48 秒，1080p）</a></p>
 
 ## 为什么需要它
 

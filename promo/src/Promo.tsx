@@ -7,9 +7,9 @@ import { Backdrop } from './parts';
 import { SANS } from './theme';
 import { Base, Card, Decision, Hook, Outro, Result, Topics, Understand } from './scenes';
 
-const T = 14;
+const T = 18;
 export const SCENES: [React.FC, number][] = [
-  [Hook, 80], [Understand, 112], [Base, 112], [Topics, 80], [Card, 84], [Decision, 84], [Result, 76], [Outro, 96],
+  [Hook, 150], [Understand, 270], [Base, 230], [Topics, 165], [Card, 195], [Decision, 205], [Result, 175], [Outro, 170],
 ];
 export const DURATION = SCENES.reduce((s, [, d]) => s + d, 0) - T * (SCENES.length - 1);
 
