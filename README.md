@@ -1,15 +1,24 @@
+<div align="center">
+
 # Empirical Workbench
 
-**和 AI 研究助理一起，把一份陌生的数据变成可核验、可复现的实证分析数据。**
+### 和 AI 研究助理一起，把一份陌生的数据变成可核验、可复现的实证分析数据
 
-面向经济学与管理学研究者的本地工作台：AI 帮你看懂数据、做好清洗与合并，与你讨论确定选题，再完成样本筛选、变量构造与探索分析。每一步都有可回查的 SQL、核验结果和运行记录。
+面向经济学与管理学研究者的本地工作台 —— AI 帮你读懂数据、做好清洗与合并，和你讨论确定选题，<br>再完成样本筛选、变量构造与探索分析。每一步都有可回查的 SQL、核验结果和运行记录。
 
 [![CI](https://github.com/xyizhan/empirical-workbench/actions/workflows/test.yml/badge.svg)](https://github.com/xyizhan/empirical-workbench/actions/workflows/test.yml)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![DuckDB](https://img.shields.io/badge/engine-DuckDB-FFF000?logo=duckdb&logoColor=black)
+![LLM](https://img.shields.io/badge/LLM-DeepSeek%20%7C%20OpenAI%20compatible-4f8cff)
+![License](https://img.shields.io/badge/license-MIT-3ddc84)
 
-<p align="center"><img src="docs/assets/demo.gif" alt="Empirical Workbench 演示" width="860"></p>
-<p align="center"><a href="docs/assets/demo.mp4">▶ 观看高清宣传片（48 秒，1080p）</a></p>
+[快速开始](#快速开始) · [宣传片](docs/assets/demo.mp4) · [界面一览](#界面一览) · [配置格式](docs/run-format.md) · [English](#english)
+
+<img src="docs/assets/demo.gif" alt="Empirical Workbench 演示" width="900">
+
+<sub>▶ <a href="docs/assets/demo.mp4">观看高清宣传片（48 秒，1080p）</a></sub>
+
+</div>
 
 ## 为什么需要它
 
@@ -26,7 +35,19 @@ Empirical Workbench 把这些步骤变成**有证据的工作流**：
 | 🔍 **全程可回查** | 每次运行保存来源文件哈希、全部 SQL、核验结果、各表行数变化、事件流和工作数据库，可随时查询任意中间表 |
 | 🖥️ **网页工作台** | `ew serve` 实时查看运行进度、阶段流程、数据规模、导出预览，在页面上做口径决策和 SQL 查询 |
 | 🇨🇳 **适配中文数据** | 自动识别 GBK 编码，证券代码等前导零保持文本；读写 CSV、Parquet、Excel、Stata `.dta` |
-| 🔓 **开放、本地** | 数据只在本地处理（DuckDB）；模型可接 DeepSeek、OpenAI 或任何兼容 OpenAI 接口的服务，包括本地 Ollama |
+| 🔓 **开放、本地** | 数据在本地用 DuckDB 处理；模型可接 DeepSeek、OpenAI 或任何兼容 OpenAI 接口的服务。对话时模型会看到助理查询的统计结果与少量样例行，涉密或授权受限的数据可接本地 Ollama |
+
+## 界面一览
+
+<table>
+<tr>
+<td width="50%"><img src="docs/assets/screens/checks-rollback.png" alt="核验与回滚"><br><sub><b>每一步都核验</b>：直接连接商品与支付明细会让订单重复（12,489 行违规），方案自动回滚，改为先汇总再合并</sub></td>
+<td width="50%"><img src="docs/assets/screens/decision.png" alt="口径决策"><br><sub><b>关键口径由你决定</b>：运行在「晚到」定义处暂停，列出两种定义的差异与边界订单，点选后以新口径重跑</sub></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/assets/screens/query.png" alt="查询中间表"><br><sub><b>全程可回查</b>：任意中间表都能用 SQL 只读查询，运行记录、导出、独立复算与报告都保存在运行目录中</sub></td>
+</tr>
+</table>
 
 ## 快速开始
 
@@ -48,15 +69,13 @@ ew chat 我的项目 --raw 原始数据目录      # 首次新建项目；之后
 
 助理会按这个顺序推进，你可以随时打断、提问或换方向：
 
-```
-原始数据
-  │  A. 理解数据，搭建数据底座（与选题无关）
-  │     识别观察单位与主键 → 核对表间关联与匹配率 → 按正确粒度合并、对账 → 标记缺失与异常（只标记，不删除）
-  ▼
-数据档案 profile.md：数据是什么、有什么特点、可能研究什么
-  │  B. 讨论并确定选题 —— 选题卡由你确认
-  ▼
-选题 A / 选题 B / …：样本筛选 → 变量构造 → 描述统计与分组对比（关键口径由你决定）
+```mermaid
+flowchart LR
+    R[("原始数据<br/>CSV · Excel · Stata · Parquet")] --> A["<b>A. 读懂数据，搭建底座</b><br/>粒度与主键 · 匹配率<br/>按正确粒度合并 · 对账<br/>缺失与异常只标记不删除"]
+    A --> P["<b>数据档案</b><br/>是什么 · 有何特点<br/>可能研究什么"]
+    P --> D{"<b>B. 与你讨论选题</b><br/>选题卡由你确认"}
+    D --> T1["选题 A<br/>样本 · 变量 · 探索<br/><i>关键口径暂停，由你决定</i>"]
+    D --> T2["选题 B<br/>换题无需重跑底座"]
 ```
 
 ### 2. 在网页里查看和决策
@@ -117,6 +136,8 @@ Olist 数据：[Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle
 
 模型只能通过工作台提供的工具操作数据：查询是只读的，写入的配置会先经过校验，选题卡的确认只能来自你在终端的输入。
 
+对话中模型会收到：各字段的类型、缺失与取值范围，助理执行的查询结果（每次最多 200 行），以及运行摘要；原始文件不会整体上传。处理涉密或授权受限的数据时，请把 `EW_LLM_BASE_URL` 指向本地模型。
+
 ## 它是怎么工作的
 
 - **配置即流程**：一个研究项目由 `base.json`（数据底座）和 `topics/*.json`（选题）组成。每个阶段写明 SQL、核验与导出；可以列出多个候选方案，失败的方案在事务中回滚，引擎尝试下一个。
@@ -144,6 +165,17 @@ cd frontend && npm install && npm run build   # 修改网页前端后重新构�
 - [ ] 在网页中与研究助理对话
 
 欢迎提交 Issue 和 Pull Request。
+
+## English
+
+**Empirical Workbench** is a local workbench and AI research assistant for empirical economics and management research. Point it at an unfamiliar dataset and `ew chat` will work with you in the terminal: it profiles every table (grain, keys, join coverage), builds a topic-independent *data base* that flags but never drops problematic rows, writes a data profile with possible research directions, and discusses a research question with you. Only after **you confirm the topic card** does it construct samples and variables; definitions that could change conclusions pause the run and wait for your choice. Every step is plain SQL with checks that return violating rows, failed plans roll back automatically, and each run keeps its SQL, checks, source hashes, events and a queryable DuckDB database. Works with DeepSeek or any OpenAI-compatible API. Data is processed locally with DuckDB; during a chat the model sees the summaries and sample rows of the queries the assistant runs, so use a local model (e.g. Ollama) for confidential or licensed data.
+
+```sh
+pip install -e '.[formats]'
+export EW_LLM_API_KEY=...            # DeepSeek by default; set EW_LLM_BASE_URL / EW_LLM_MODEL for others
+ew chat my-project --raw path/to/raw-data
+ew serve --runs my-project/runs      # local web workbench
+```
 
 ## 许可证
 
