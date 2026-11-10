@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Olist run: `ew run studies/olist/study.json --raw ../data/raw --out runs/olist-$(date +%s) --batch`. The Olist CSVs are not in the repo: they live at `../data/raw` (or `OLIST_RAW`). `raw/` and `runs/` are gitignored.
 - `--out` must be a new directory. The CLI refuses to reuse an existing one.
 - `ew validate STUDY` checks a config without data; `ew report RUN --source-only` writes `report.qmd` without Quarto.
-- Before/after any engine change, compare exports of a fresh Olist run against a run from the previous commit byte for byte (gz decompressed): refactors must not change results.
+- Before/after any engine change, compare exports of a fresh Olist run (both `延误定义` values) against a run from the previous commit cell by cell (numbers within 1e-9, gz decompressed) and confirm `verify.log` passes: refactors must not change results.
 - Always pass `--batch` when running non-interactively. `ew demo` and `./demo-olist` need a real TTY and will error under Claude. A decision left without a value pauses the run and exits non-zero.
 - `--report` / `ew report` need Quarto on PATH or `QUARTO_BIN`. Skip it unless the change is about the report.
 
@@ -20,8 +20,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `ew/study.py` validates and normalizes `study.json` (stages always have `candidates`, list-form `checks` with `severity`; tools are `{argv, label}`). Normalization must stay idempotent. New study keys must be added to `STUDY_KEYS`/`STAGE_KEYS` or validation rejects them.
 - `ew/engine.py` only executes and records: it fills `run['stages']` and emits events through `ew/record.py`'s `Recorder`. Display, prompts and classroom pages are listeners/callbacks wired in `ew/cli.py`; event kinds must be registered in `record.EVENTS`.
 - No study-specific code in `ew/`. Study-specific reports live in the study (`studies/olist/report.py`, loaded via `"report": {"builder": ...}`), as do verification tools.
-- Engine is in-memory SQLite today; the planned move to DuckDB (no SAVEPOINT support) must keep per-candidate rollback semantics.
-- The only runtime dependency is `rich`. The engine itself uses only the standard library.
+- Engine is DuckDB (`ew/engine.py`), file I/O by extension in `ew/io.py`. Each candidate runs in its own `BEGIN/ROLLBACK` transaction; the working database is kept as `OUT/run.duckdb` (`ew query`). Study SQL is DuckDB dialect: strict GROUP BY, real column types, no `julianday`; add ORDER BY to exports whose row order matters.
+- Runtime dependencies: `rich`, `duckdb`. pandas/openpyxl are optional (`[formats]`, for .xlsx/.dta) and must stay lazily imported.
 
 ## Conventions
 

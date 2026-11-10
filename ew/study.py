@@ -1,10 +1,10 @@
 """Load, validate and normalize a study specification (study.json)."""
 import json
-import re
 from pathlib import Path
 
 STUDY_KEYS = {'title', 'question', 'unit', 'description', 'sources', 'decisions', 'stages', 'tools', 'report', 'guide'}
 STAGE_KEYS = {'name', 'description', 'sql', 'candidates', 'checks', 'exports', 'decision', 'classroom'}
+SOURCE_KEYS = {'file', 'columns', 'types', 'encoding', 'delimiter', 'sheet', 'description'}
 SEVERITIES = ('error', 'warn')
 
 
@@ -14,12 +14,6 @@ class StudyError(ValueError):
     def __init__(self, path, problems):
         self.problems = problems
         super().__init__(f'{path}: 研究配置有 {len(problems)} 处问题\n' + '\n'.join('  - ' + p for p in problems))
-
-
-def ident(name):
-    if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', name):
-        raise ValueError(f'Invalid SQL identifier {name!r}')
-    return '"' + name + '"'
 
 
 def _sql_list(value, where, problems):
@@ -66,22 +60,17 @@ def normalize(spec, base=None, path='study.json'):
         problems.append('sources 应为非空对象：表名 → {file, columns}')
         sources = {}
     for table, source in sources.items():
-        try:
-            ident(table)
-        except ValueError:
-            problems.append(f'sources.{table}：表名只能用字母、数字和下划线，且不能以数字开头')
         if not isinstance(source, dict) or not isinstance(source.get('file'), str):
             problems.append(f'sources.{table} 缺少 file')
             continue
+        unknown = set(source) - SOURCE_KEYS
+        if unknown:
+            problems.append(f'sources.{table} 含未知字段 {", ".join(sorted(unknown))}（可用：{", ".join(sorted(SOURCE_KEYS))}）')
         columns = source.get('columns')
-        if not isinstance(columns, list) or not columns:
-            problems.append(f'sources.{table}.columns 应为非空字段名数组')
-            continue
-        for column in columns:
-            try:
-                ident(column)
-            except (ValueError, TypeError):
-                problems.append(f'sources.{table}.columns：字段名 {column!r} 不是合法标识符')
+        if columns is not None and (not isinstance(columns, list) or not columns or not all(isinstance(c, str) and c for c in columns)):
+            problems.append(f'sources.{table}.columns 应为非空字段名数组；省略则读取全部字段')
+        if not isinstance(source.get('types', {}), dict):
+            problems.append(f'sources.{table}.types 应为对象：字段 → DuckDB 类型')
 
     decisions = spec.setdefault('decisions', {})
     if not isinstance(decisions, dict):

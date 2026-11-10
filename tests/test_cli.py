@@ -42,8 +42,8 @@ class RunCase(unittest.TestCase):
 class WorkflowTest(RunCase):
     def test_sample_and_recovery(self):
         spec = panel_spec()
-        spec['stages'][0]['candidates'] = [{'name': 'bad', 'sql': ['create table scratch(x)', 'select * from missing_table']},
-                                           {'name': 'retry', 'sql': ['create table scratch(x)']}]
+        spec['stages'][0]['candidates'] = [{'name': 'bad', 'sql': ['create table scratch(x int)', 'select * from missing_table']},
+                                           {'name': 'retry', 'sql': ['create table scratch(x int)']}]
         out, _ = self.run_ew(spec, '--batch')
         run = record.load(out)
         self.assertEqual(run['status'], 'passed')
@@ -192,6 +192,50 @@ class ReportTest(RunCase):
         out, _ = self.run_ew(spec, '--batch', check=False)
         with self.assertRaises(ValueError):
             report.write_source(out)
+
+
+class DataFormatTest(RunCase):
+    def gbk_panel(self):
+        raw = self.dir / 'raw'
+        raw.mkdir()
+        text = '证券代码,年度,营业收入\n000001,2020,100\n000001,2021,120\n600000,2020,80\n600000,2021,\n'
+        (raw / 'fin.csv').write_bytes(text.encode('gbk'))
+        spec = {'title': '编码与格式', 'sources': {'fin': {'file': 'fin.csv'}},
+                'stages': [{'name': '导出', 'sql': ['create table t as select * from fin'],
+                            'checks': {'代码保留前导零': "select * from t where length(证券代码) != 6"},
+                            'exports': {'t.parquet': 'select * from t', 't.dta': 'select 证券代码 as code, 年度 as year from t', 't.csv': 'select * from t'}}]}
+        return raw, spec
+
+    def test_gbk_source_types_and_exports(self):
+        raw, spec = self.gbk_panel()
+        out, _ = self.run_ew(spec, '--batch', raw=raw)
+        run = record.load(out)
+        self.assertEqual(run['status'], 'passed')
+        source = run['sources']['fin']
+        self.assertEqual(source['encoding'], 'gb18030')
+        self.assertEqual(source['types']['证券代码'], 'VARCHAR')
+        self.assertEqual(source['types']['营业收入'], 'BIGINT')
+        self.assertIn('000001,2020,100', (out / 't.csv').read_text())
+        import duckdb
+        self.assertEqual(duckdb.connect().execute(f"select count(*) from '{out / 't.parquet'}'").fetchone()[0], 4)
+        try:
+            import pandas
+        except ImportError:
+            return
+        self.assertEqual(list(pandas.read_stata(out / 't.dta')['code']), ['000001', '000001', '600000', '600000'])
+
+    def test_query_and_inspect(self):
+        raw, spec = self.gbk_panel()
+        out, _ = self.run_ew(spec, '--batch', raw=raw)
+        proc = subprocess.run([sys.executable, '-m', 'ew.cli', 'query', str(out), 'select 证券代码, count(营业收入) n from t group by 1 order by 1', '--format', 'json'],
+                              capture_output=True, text=True, cwd=ROOT, check=True)
+        self.assertEqual(json.loads(proc.stdout), [{'证券代码': '000001', 'n': 2}, {'证券代码': '600000', 'n': 1}])
+        proc = subprocess.run([sys.executable, '-m', 'ew.cli', 'query', str(out), 'drop table t'], capture_output=True, text=True, cwd=ROOT)
+        self.assertNotEqual(proc.returncode, 0)
+        proc = subprocess.run([sys.executable, '-m', 'ew.cli', 'inspect', str(raw), '--json'], capture_output=True, text=True, cwd=ROOT, check=True)
+        columns = {c['name']: c for c in json.loads(proc.stdout)['fin.csv']['columns']}
+        self.assertIn('含前导零代码，应保持文本', columns['证券代码']['hints'])
+        self.assertEqual(columns['营业收入']['missing'], 1)
 
 
 @unittest.skipUnless((OLIST_RAW / 'olist_orders_dataset.csv').is_file(), 'Olist CSVs not available (set OLIST_RAW)')

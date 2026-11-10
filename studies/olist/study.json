@@ -103,14 +103,14 @@
       "checks": {
         "订单主键集合及行数一致": "select order_id from orders except select order_id from base",
         "每单至多一行": "select order_id from base group by order_id having count(*)!=1",
-        "评分在1至5": "select rowid,review_score from reviews where review_score is null or review_score not in ('1','2','3','4','5')",
+        "评分在1至5": "select rowid,review_score from reviews where review_score is null or review_score not between 1 and 5",
         "item_cents 守恒": "select sum(item_cents) from base having sum(item_cents) != (select sum(cast(round(price*100) as integer)) from items)",
         "freight_cents 守恒": "select sum(freight_cents) from base having sum(freight_cents) != (select sum(cast(round(freight_value*100) as integer)) from items)",
         "paid_cents 守恒": "select sum(paid_cents) from base having sum(paid_cents) != (select sum(cast(round(payment_value*100) as integer)) from payments)"
       },
       "exports": {
         "匹配对账.csv": "select count(*) orders,sum(item_n is null) no_item,sum(payment_n is null) no_payment,sum(review_n is null) no_review,sum(item_cents) item_cents,sum(freight_cents) freight_cents,sum(paid_cents) paid_cents from base",
-        "连接诊断.csv": "select b.order_id,b.item_n,b.payment_n,b.paid_cents as verified_cents,sum(cast(round(p.payment_value*100) as integer)) as naive_cents from base b join items i using(order_id) join payments p using(order_id) where b.item_n=2 and b.payment_n=2 group by b.order_id order by b.order_id limit 5"
+        "连接诊断.csv": "select b.order_id,b.item_n,b.payment_n,b.paid_cents as verified_cents,sum(cast(round(p.payment_value*100) as integer)) as naive_cents from base b join items i using(order_id) join payments p using(order_id) where b.item_n=2 and b.payment_n=2 group by b.order_id,b.item_n,b.payment_n,b.paid_cents order by b.order_id limit 5"
       },
       "candidates": [
         {
@@ -168,15 +168,15 @@
     {
       "name": "3 质量标记",
       "sql": [
-        "create table quality as select *,case when order_status is null then 'status_unknown' when order_status!='delivered' then 'outside_delivered' when order_delivered_customer_date is null then 'missing_actual' when julianday(order_delivered_customer_date)<julianday(order_purchase_timestamp) then 'negative_duration' when order_purchase_timestamp is null or order_estimated_delivery_date is null then 'missing_reference' else 'eligible' end quality from base"
+        "create table quality as select *,case when order_status is null then 'status_unknown' when order_status!='delivered' then 'outside_delivered' when order_delivered_customer_date is null then 'missing_actual' when order_delivered_customer_date<order_purchase_timestamp then 'negative_duration' when order_purchase_timestamp is null or order_estimated_delivery_date is null then 'missing_reference' else 'eligible' end quality from base"
       ],
       "checks": {
-        "order_purchase_timestamp 时间可解析": "select order_id,order_purchase_timestamp from base where order_purchase_timestamp is not null and julianday(order_purchase_timestamp) is null",
-        "order_delivered_customer_date 时间可解析": "select order_id,order_delivered_customer_date from base where order_delivered_customer_date is not null and julianday(order_delivered_customer_date) is null",
-        "order_estimated_delivery_date 时间可解析": "select order_id,order_estimated_delivery_date from base where order_estimated_delivery_date is not null and julianday(order_estimated_delivery_date) is null"
+        "order_purchase_timestamp 时间可解析": "select order_id,order_purchase_timestamp from base where order_purchase_timestamp is not null and try_cast(order_purchase_timestamp as timestamp) is null",
+        "order_delivered_customer_date 时间可解析": "select order_id,order_delivered_customer_date from base where order_delivered_customer_date is not null and try_cast(order_delivered_customer_date as timestamp) is null",
+        "order_estimated_delivery_date 时间可解析": "select order_id,order_estimated_delivery_date from base where order_estimated_delivery_date is not null and try_cast(order_estimated_delivery_date as timestamp) is null"
       },
       "exports": {
-        "质量处置.csv": "select quality,count(*) n,min(order_id) example from quality group by quality"
+        "质量处置.csv": "select quality,count(*) n,min(order_id) example from quality group by quality order by quality"
       },
       "classroom": {
         "done": [
@@ -201,11 +201,11 @@
     {
       "name": "4 构造变量与样本",
       "sql": [
-        "create table candidates as select *,julianday(order_delivered_customer_date)-julianday(order_purchase_timestamp) delivery_days,date(order_delivered_customer_date)>date(order_estimated_delivery_date) late_day,order_delivered_customer_date>order_estimated_delivery_date late_clock,quality='eligible' and score is not null rated from quality"
+        "create table candidates as select *,date_diff('second',order_purchase_timestamp,order_delivered_customer_date)/86400.0 delivery_days,(cast(order_delivered_customer_date as date)>cast(order_estimated_delivery_date as date))::int late_day,(order_delivered_customer_date>order_estimated_delivery_date)::int late_clock,(quality='eligible' and score is not null)::int rated from quality"
       ],
       "checks": {},
       "exports": {
-        "口径比较.csv": "select sum(rated) denominator,sum(late_day) late_day_n,sum(late_clock) late_clock_n,sum(late_day!=late_clock) switched,min(case when late_day!=late_clock then order_id end) example from candidates where rated",
+        "口径比较.csv": "select sum(rated) denominator,sum(late_day) late_day_n,sum(late_clock) late_clock_n,sum(late_day!=late_clock) switched,min(case when late_day!=late_clock then order_id end) example from candidates where rated=1",
         "样本筛选.csv": "select count(*) all_orders,sum(order_status='delivered') delivered,sum(quality='eligible') fulfillment,sum(rated) rated from candidates"
       },
       "decision": "延误定义",
@@ -219,7 +219,7 @@
                 "sql": "with n as (select count(*) a,sum(order_status='delivered') b,sum(quality='eligible') c,sum(rated) d from candidates) select '① 所有订单' 筛选步骤,a 保留订单,0 本步排除 from n union all select '  ② 已送达',b,a-b from n union all select '    ③ 可计算履约',c,b-c from n union all select '      ④ 有评分',d,c-d from n"
               },
               {
-                "sql": "select order_id 订单号,order_estimated_delivery_date 预计,order_delivered_customer_date 签收 from candidates where rated and late_day!=late_clock order by order_id limit 1",
+                "sql": "select order_id 订单号,order_estimated_delivery_date 预计,order_delivered_customer_date 签收 from candidates where rated=1 and late_day!=late_clock order by order_id limit 1",
                 "detail": true
               }
             ],
@@ -232,19 +232,19 @@
     {
       "name": "5 描述统计与探索",
       "sql": [
-        "create table analysis as select c.*,case when rated then case value when 'calendar' then late_day else late_clock end end late from candidates c cross join decision",
-        "create table eda as select late,count(*) n,avg(score) mean_score,sum(score<=2) low_score_n,sum(score>=4) high_score_n from analysis where rated group by late",
-        "create table post as select r.order_id,avg(cast(review_score as real)) post_score from reviews r join orders o using(order_id) where julianday(review_answer_timestamp)>=julianday(order_delivered_customer_date) group by r.order_id",
-        "create table branches as select 'A' branch,order_id,late,score from analysis where rated union all select 'B',a.order_id,late,score from analysis a join post using(order_id) where rated union all select 'C',a.order_id,late,post_score from analysis a join post using(order_id) where rated"
+        "create table analysis as select c.*,case when rated=1 then case value when 'calendar' then late_day else late_clock end end late from candidates c cross join decision",
+        "create table eda as select late,count(*) n,avg(score) mean_score,sum(score<=2) low_score_n,sum(score>=4) high_score_n from analysis where rated=1 group by late",
+        "create table post as select r.order_id,avg(cast(review_score as real)) post_score from reviews r join orders o using(order_id) where review_answer_timestamp>=order_delivered_customer_date group by r.order_id",
+        "create table branches as select 'A' branch,order_id,late,score from analysis where rated=1 union all select 'B',a.order_id,late,score from analysis a join post using(order_id) where rated=1 union all select 'C',a.order_id,late,post_score from analysis a join post using(order_id) where rated=1"
       ],
       "checks": {
-        "两组分母覆盖分析样本": "select sum(n) from eda having sum(n)!=(select sum(rated) from analysis) or (select count(*) from analysis where rated and late is null)>0"
+        "两组分母覆盖分析样本": "select sum(n) from eda having sum(n)!=(select sum(rated) from analysis) or (select count(*) from analysis where rated=1 and late is null)>0"
       },
       "exports": {
         "分析数据.csv.gz": "select * from analysis order by order_id",
         "图表底表.csv": "select * from eda order by late",
-        "评分分布.csv": "select late,score,count(*) n from analysis where rated group by late,score order by late,score",
-        "边界记录.csv": "select order_id,order_delivered_customer_date,order_estimated_delivery_date,late_day,late_clock,score,late from analysis where rated and late_day!=late_clock order by order_id limit 3",
+        "评分分布.csv": "select late,score,count(*) n from analysis where rated=1 group by late,score order by late,score",
+        "边界记录.csv": "select order_id,order_delivered_customer_date,order_estimated_delivery_date,late_day,late_clock,score,late from analysis where rated=1 and late_day!=late_clock order by order_id limit 3",
         "探索对照.csv": "select branch,late,count(*) n,avg(score) mean_score from branches group by branch,late order by branch,late"
       },
       "classroom": {

@@ -10,7 +10,9 @@ import webbrowser
 from itertools import islice
 from pathlib import Path
 
-from . import __version__, engine, record, report, study as studies
+import duckdb
+
+from . import __version__, engine, io, record, report, study as studies
 from .record import EVENTS, DecisionRequired, Interrupted, Recorder
 from .terminal import show_run
 
@@ -149,29 +151,105 @@ def cmd_run(args, parser):
         presenter.finish(out)
 
 
+def profile_table(db, table):
+    """Column profile of a loaded table: type, missing share, distinct values, range, hints."""
+    rows = db.execute(f'SELECT count(*) FROM {io.ident(table)}').fetchone()[0]
+    columns = []
+    for name, ctype, lo, hi, distinct, null_pct in db.execute(
+            f'SELECT column_name, column_type, min, max, approx_unique, null_percentage FROM (SUMMARIZE {io.ident(table)})').fetchall():
+        col = io.ident(name)
+        missing = db.execute(f'SELECT count(*) - count({col}) FROM {io.ident(table)}').fetchone()[0]
+        hints = []
+        if missing == 0 and rows and db.execute(f'SELECT count(DISTINCT {col}) FROM {io.ident(table)}').fetchone()[0] == rows:
+            hints.append('候选主键')
+        if ctype == 'VARCHAR' and rows:
+            zeros, numeric, filled = db.execute(
+                f"SELECT count_if(regexp_full_match({col}, '0[0-9]+')), count(TRY_CAST(replace({col}, ',', '') AS DOUBLE)), count({col}) "
+                f'FROM {io.ident(table)}').fetchone()
+            if zeros:
+                hints.append('含前导零代码，应保持文本')
+            elif filled and numeric == filled:
+                hints.append('疑似数值被读成文本')
+        columns.append(dict(name=name, type=ctype, missing=missing, missing_share=round(missing / rows, 4) if rows else 0,
+                            distinct=distinct, min=lo, max=hi, hints=hints))
+    return dict(rows=rows, columns=columns)
+
+
 def cmd_inspect(args):
-    profile = {}
-    for path in sorted(args.raw.glob('*.csv')):
-        with path.open(newline='', encoding='utf-8-sig') as stream:
-            reader = csv.DictReader(stream)
-            fields = reader.fieldnames or []
-            nulls = dict.fromkeys(fields, 0)
-            count = 0
-            for row in reader:
-                count += 1
-                for field in fields:
-                    if not row[field]:
-                        nulls[field] += 1
-            profile[path.name] = dict(rows=count, missing=nulls)
-    print(json.dumps(profile, ensure_ascii=False, indent=2))
+    paths = [args.raw] if args.raw.is_file() else sorted(p for p in args.raw.iterdir()
+                                                         if p.suffix.lower() in io.TEXT + io.PANDAS + ('.parquet',) and not p.name.startswith('.'))
+    db = engine.connect(':memory:')
+    profiles = {}
+    for index, path in enumerate(paths):
+        table = f'source_{index}'
+        try:
+            info = io.load(db, table, path, {})
+        except Exception as exc:
+            profiles[path.name] = dict(error=str(exc))
+            continue
+        profiles[path.name] = dict(encoding=info['encoding'], **profile_table(db, table))
+    if args.json:
+        print(json.dumps(profiles, ensure_ascii=False, indent=2, default=str))
+        return
+    from rich.console import Console
+    from rich.table import Table
+    console = Console()
+    for name, prof in profiles.items():
+        if 'error' in prof:
+            console.print(f'[red]{name}：{prof["error"]}[/red]')
+            continue
+        table = Table(title=f'{name}　{prof["rows"]:,} 行' + (f'　编码 {prof["encoding"]}' if prof['encoding'] not in (None, 'utf-8') else ''),
+                      title_justify='left', header_style='bold cyan')
+        for head in ('字段', '类型', '缺失', '不同值≈', '最小', '最大', '提示'):
+            table.add_column(head, overflow='fold')
+        for c in prof['columns']:
+            table.add_row(c['name'], c['type'], f'{c["missing"]:,}（{c["missing_share"]:.1%}）' if c['missing'] else '0',
+                          f'{c["distinct"]:,}', str(c['min'])[:24], str(c['max'])[:24], '；'.join(c['hints']))
+        console.print(table)
+
+
+def cmd_query(args):
+    out = args.out.resolve()
+    run = record.load(out)
+    if not run.get('database') or not (out / run['database']).is_file():
+        raise ValueError(f'{out} 没有保存工作数据库')
+    db = engine.connect(out / run['database'], read_only=True)
+    try:
+        cursor = db.execute(args.sql)
+        columns = [c[0] for c in cursor.description or ()]
+        rows = cursor.fetchmany(args.limit) if args.limit else cursor.fetchall()
+    finally:
+        db.close()
+    if args.format == 'json':
+        print(json.dumps([dict(zip(columns, r)) for r in rows], ensure_ascii=False, indent=2, default=str))
+    elif args.format == 'csv':
+        writer = csv.writer(sys.stdout)
+        writer.writerow(columns)
+        writer.writerows(rows)
+    else:
+        from rich.console import Console
+        from rich.table import Table
+        table = Table(header_style='bold cyan')
+        for column in columns:
+            table.add_column(column, overflow='fold')
+        for row in rows:
+            table.add_row(*('缺失' if v is None else str(v) for v in row))
+        Console().print(table)
+        print(f'{len(rows):,} 行' + ('（已截断，--limit 0 显示全部）' if args.limit and len(rows) == args.limit else ''))
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='ew', description='Empirical Workbench：可核验的实证数据处理工作台')
     parser.add_argument('--version', action='version', version=f'ew {__version__}')
     cmds = parser.add_subparsers(dest='cmd', required=True)
-    inspect = cmds.add_parser('inspect', help='概览目录中 CSV 的行数与缺失')
-    inspect.add_argument('raw', type=Path)
+    inspect = cmds.add_parser('inspect', help='概览原始文件：类型、缺失、候选主键与异常提示')
+    inspect.add_argument('raw', type=Path, help='数据目录或单个文件')
+    inspect.add_argument('--json', action='store_true', help='输出 JSON，便于 Agent 读取')
+    query = cmds.add_parser('query', help='在一次运行的工作数据库上执行只读 SQL')
+    query.add_argument('out', type=Path)
+    query.add_argument('sql')
+    query.add_argument('--format', choices=['table', 'csv', 'json'], default='table')
+    query.add_argument('--limit', type=int, default=50, help='最多显示行数，0 为全部')
     validate = cmds.add_parser('validate', help='检查研究配置，不读取数据')
     validate.add_argument('study', type=Path)
     run = cmds.add_parser('run', aliases=['demo'], help='执行研究（demo 为课堂投影模式）')
@@ -195,6 +273,8 @@ def main(argv=None):
     try:
         if args.cmd == 'inspect':
             cmd_inspect(args)
+        elif args.cmd == 'query':
+            cmd_query(args)
         elif args.cmd == 'validate':
             spec = studies.load(args.study)
             print(f'✓ {args.study}：{len(spec["sources"])} 个来源，{len(spec["stages"])} 个阶段，'
@@ -216,7 +296,7 @@ def main(argv=None):
             print(path)
     except studies.StudyError as exc:
         sys.exit(str(exc))
-    except (ValueError, FileNotFoundError, subprocess.CalledProcessError) as exc:
+    except (ValueError, FileNotFoundError, RuntimeError, duckdb.Error, subprocess.CalledProcessError) as exc:
         sys.exit(f'ew {args.cmd}：{exc}')
 
 

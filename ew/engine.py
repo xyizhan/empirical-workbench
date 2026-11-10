@@ -1,17 +1,19 @@
-"""Execute a normalized study specification on local CSV sources with SQLite.
+"""Execute a normalized study specification with DuckDB.
 
 The engine only executes and records: it fills the stage entries of the run record and
 emits events. Display, prompting and presentation happen in callbacks supplied by the CLI.
+Each candidate plan runs in its own transaction and is rolled back if any SQL or
+error-severity check fails. The database is kept as OUT/run.duckdb for later queries.
 """
-import csv
-import gzip
-import sqlite3
 import time
 
+import duckdb
+
+from . import io
 from .record import DecisionRequired, sha256
-from .study import ident
 
 EXAMPLES = 5
+DATABASE = 'run.duckdb'
 
 
 class CheckFailed(ValueError):
@@ -21,32 +23,26 @@ class CheckFailed(ValueError):
         super().__init__(f'{result["name"]}：{result["violations"]:,} 行违规{example}')
 
 
+def connect(path, read_only=False):
+    return duckdb.connect(str(path), read_only=read_only)
+
+
 def load_sources(db, spec, raw, run, emit):
     for table, source in spec['sources'].items():
         path = raw / source['file']
         emit('source.load', path.name, table=table)
-        columns = source['columns']
-        with path.open(encoding='utf-8-sig', newline='') as stream:
-            reader = csv.DictReader(stream)
-            missing = set(columns) - set(reader.fieldnames or [])
-            if missing:
-                raise ValueError(f'{table}：{path.name} 缺少字段 {", ".join(sorted(missing))}')
-            db.execute(f'CREATE TABLE {ident(table)} ({",".join(map(ident, columns))})')
-            markers = ','.join('?' for _ in columns)
-            db.executemany(f'INSERT INTO {ident(table)} VALUES ({markers})',
-                           (tuple(row[c] or None for c in columns) for row in reader))
-        rows = db.execute(f'SELECT count(*) FROM {ident(table)}').fetchone()[0]
-        run['sources'][table] = dict(file=path.name, sha256=sha256(path), rows=rows, columns=columns)
-        emit('source.loaded', f'{table} · {rows:,} 行', table=table, rows=rows)
+        info = io.load(db, table, path, source)
+        run['sources'][table] = dict(file=path.name, sha256=sha256(path), **info)
+        emit('source.loaded', f'{table} · {info["rows"]:,} 行', table=table, rows=info['rows'])
 
 
 def snapshot(db):
     """Row counts and columns of every table, used to report what a stage changed."""
     tables = {}
-    for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"):
-        cursor = db.execute(f'SELECT * FROM "{name}" LIMIT 0')
-        tables[name] = dict(rows=db.execute(f'SELECT count(*) FROM "{name}"').fetchone()[0],
-                            columns=[c[0] for c in cursor.description])
+    names = [r[0] for r in db.execute("SELECT table_name FROM duckdb_tables() WHERE schema_name = 'main' ORDER BY table_name").fetchall()]
+    for name in names:
+        columns = [c[0] for c in db.execute(f'SELECT * FROM {io.ident(name)} LIMIT 0').description]
+        tables[name] = dict(rows=db.execute(f'SELECT count(*) FROM {io.ident(name)}').fetchone()[0], columns=columns)
     return tables
 
 
@@ -63,33 +59,18 @@ def table_changes(before, after):
     return changes
 
 
+def plain(value):
+    return value if value is None or isinstance(value, (int, float, str, bool)) else str(value)
+
+
 def run_check(db, check):
     sql = check['sql'].strip().rstrip(';')
     cursor = db.execute(sql)
-    examples = [list(row) for row in cursor.fetchmany(EXAMPLES)]
     columns = [c[0] for c in cursor.description or ()]
-    violations = 0
-    if examples:
-        try:
-            violations = db.execute(f'SELECT count(*) FROM ({sql})').fetchone()[0]
-        except sqlite3.Error:
-            violations = None
+    examples = [[plain(v) for v in row] for row in cursor.fetchmany(EXAMPLES)]
+    violations = db.execute(f'SELECT count(*) FROM ({sql})').fetchone()[0] if examples else 0
     return dict(name=check['name'], severity=check['severity'], passed=not examples,
                 violations=violations, columns=columns, examples=examples)
-
-
-def export(db, query, path):
-    cursor = db.execute(query)
-    columns = [c[0] for c in cursor.description]
-    opener = gzip.open if path.name.endswith('.gz') else open
-    rows = 0
-    with opener(path, 'wt', encoding='utf-8', newline='') as stream:
-        writer = csv.writer(stream)
-        writer.writerow(columns)
-        for row in cursor:
-            writer.writerow(row)
-            rows += 1
-    return dict(file=path.name, rows=rows, columns=columns)
 
 
 def try_plans(db, stage, record, emit, checkpoint):
@@ -99,7 +80,7 @@ def try_plans(db, stage, record, emit, checkpoint):
         record['attempts'].append(attempt)
         emit('plan.start', plan['name'], plan=plan['name'], candidates=len(plans))
         started = time.perf_counter()
-        db.execute('SAVEPOINT candidate')
+        db.execute('BEGIN TRANSACTION')
         try:
             for sql in plan['sql']:
                 emit('sql', sql)
@@ -115,17 +96,19 @@ def try_plans(db, stage, record, emit, checkpoint):
                 else:
                     emit('check.fail', f'{check["name"]} · {result["violations"]:,} 行', **result)
                     raise CheckFailed(result)
-        except (ValueError, sqlite3.Error) as exc:
-            if checkpoint:
+        except (ValueError, duckdb.Error) as exc:
+            if checkpoint and isinstance(exc, CheckFailed):
                 checkpoint(db, stage, 'rejected', exc)
-            db.execute('ROLLBACK TO candidate')
-            db.execute('RELEASE candidate')
-            attempt.update(outcome='rejected', reason=str(exc), duration_s=round(time.perf_counter() - started, 3))
-            emit('plan.rollback', f'{plan["name"]} · {exc}', plan=plan['name'])
+            db.execute('ROLLBACK')
+            attempt.update(outcome='rejected', reason=str(exc).strip(), duration_s=round(time.perf_counter() - started, 3))
+            emit('plan.rollback', f'{plan["name"]} · {attempt["reason"]}', plan=plan['name'])
             if plan is plans[-1]:
                 raise
+        except BaseException:
+            db.execute('ROLLBACK')
+            raise
         else:
-            db.execute('RELEASE candidate')
+            db.execute('COMMIT')
             attempt.update(outcome='accepted', duration_s=round(time.perf_counter() - started, 3))
             emit('plan.accept', plan['name'], plan=plan['name'])
             return
@@ -141,8 +124,9 @@ def apply_decision(db, spec, stage, record, emit, choose, out):
     if value not in decision['options']:
         raise DecisionRequired(f'待研究者确定口径「{name}」；可选 {", ".join(decision["options"])}，证据见本次输出')
     emit('decision.made', f'{name} = {value}', name=name, value=value, source=record['decision']['source'])
-    db.execute('CREATE TABLE decision(value TEXT)')
-    db.execute('INSERT INTO decision VALUES (?)', (value,))
+    db.execute('CREATE TABLE IF NOT EXISTS decisions(name VARCHAR PRIMARY KEY, value VARCHAR)')
+    db.execute('INSERT OR REPLACE INTO decisions VALUES (?, ?)', [name, value])
+    db.execute('CREATE OR REPLACE TABLE decision AS SELECT ?::VARCHAR AS value', [value])
 
 
 def run(spec, raw, out, run_record, emit, choose=None, checkpoint=None, on_stage_end=None):
@@ -151,7 +135,8 @@ def run(spec, raw, out, run_record, emit, choose=None, checkpoint=None, on_stage
     Raises on the first stage that cannot complete; the failing stage is marked
     'failed' (or 'needs_decision') and later stages stay 'pending'.
     """
-    db = sqlite3.connect(':memory:')
+    db = connect(out / DATABASE)
+    run_record['database'] = DATABASE
     try:
         load_sources(db, spec, raw, run_record, emit)
         for stage, record in zip(spec['stages'], run_record['stages']):
@@ -163,7 +148,7 @@ def run(spec, raw, out, run_record, emit, choose=None, checkpoint=None, on_stage
                 try_plans(db, stage, record, emit, checkpoint)
                 for name, query in stage['exports'].items():
                     emit('export', name)
-                    record['exports'].append(export(db, query, out / name))
+                    record['exports'].append(io.export(db, query, out / name))
                 if checkpoint:
                     checkpoint(db, stage, 'done')
                 if 'decision' in stage:

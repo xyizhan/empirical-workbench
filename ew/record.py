@@ -86,6 +86,7 @@ def new_run(study_path, spec, raw):
             'unit': spec.get('unit', ''),
         },
         'raw': str(raw),
+        'database': None,
         'sources': {},
         'stages': [dict(name=s['name'], description=s.get('description', ''), status='pending',
                         attempts=[], exports=[], tables=[], duration_s=None) for s in spec['stages']],

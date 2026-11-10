@@ -5,9 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "empirical-workbench"
 dynamic = ["version"]
-dependencies = ["rich>=13,<16"]
+dependencies = ["rich>=13,<16", "duckdb>=1.1"]
 description = "Evidence-driven empirical data workflows with a local visual console"
 requires-python = ">=3.10"
+
+[project.optional-dependencies]
+formats = ["pandas>=2", "openpyxl>=3"]
 
 [project.scripts]
 ew = "ew.cli:main"

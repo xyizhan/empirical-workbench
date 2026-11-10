@@ -9,8 +9,12 @@ Empirical Workbench 的引擎、终端与网页查看器、报告插件、复算
   "title": "企业年度收入增长",              // 可选，报告与查看器标题
   "question": "各企业逐年收入增长率是多少？", // 可选，研究问题
   "unit": "一行一个企业年度",               // 可选，分析单位
-  "sources": {                             // 必填：表名 → 本地 CSV 与所需字段
-    "raw": {"file": "panel.csv", "columns": ["firm", "year", "revenue"]}
+  "sources": {                             // 必填：表名 → 本地文件
+    "raw": {"file": "panel.csv",           // .csv .tsv .txt .parquet；装 [formats] 后可读 .xlsx .xls .dta
+            "columns": ["firm", "year", "revenue"],  // 可选，省略则读取全部字段
+            "types": {"firm": "VARCHAR"},  // 可选，覆盖自动识别的 DuckDB 类型
+            "encoding": "gbk",             // 可选，默认自动识别（UTF-8，否则按 GB18030）
+            "delimiter": ",", "sheet": 0}  // 可选
   },
   "decisions": {                           // 可选：需研究者确定的口径
     "延误定义": {"options": ["calendar", "clock"], "value": "calendar",
@@ -25,7 +29,7 @@ Empirical Workbench 的引擎、终端与网页查看器、报告插件、复算
       "行数一致": "select ...",
       "收入为正": {"sql": "select ...", "severity": "warn", "description": "提醒但不阻断"}
     },
-    "exports": {"分析表.csv": "select ...", "大表.csv.gz": "select ..."},
+    "exports": {"分析表.csv": "select ...", "大表.parquet": "select ...", "回归样本.dta": "select ..."},  // .csv .csv.gz .parquet；[formats] 另支持 .dta .xlsx
     "decision": "延误定义",                 // 可选：本阶段结束时确定该口径，SQL 可读 decision 表
     "classroom": {"done": [], "rejected": []} // 可选：课堂投影页面
   }],
@@ -37,6 +41,9 @@ Empirical Workbench 的引擎、终端与网页查看器、报告插件、复算
 }
 ```
 
+- SQL 使用 DuckDB 方言。来源按真实类型读入（时间戳、整数、浮点），以 0 开头的代码保持文本。GROUP BY 须列出所有非聚合字段；需要稳定行序的导出请写 ORDER BY。
+- 每个候选方案在独立事务中执行：任何 SQL 错误或 error 级核验违规都会整体回滚该方案。
+- 口径确定后，SQL 可读 `decision`（单列 value，最近确定的口径）或 `decisions(name, value)`。
 - `ew validate STUDY` 一次列出全部问题：未知字段、重名阶段、未声明的口径、非法文件名等。
 - 核验 `severity` 为 `error`（默认）时，违规会回滚当前候选方案并尝试下一个；为 `warn` 时只记录。
 - 工具参数中的 `{python}` `{study}` `{raw}` `{out}` 分别替换为当前解释器、研究目录、原始数据目录和运行目录。工具运行时 `{out}/run.json` 已包含全部阶段结果与口径（`status` 仍为 `running`）。非零退出使整次运行失败。
@@ -53,7 +60,9 @@ Empirical Workbench 的引擎、终端与网页查看器、报告插件、复算
   "started_at": "2026-11-10T01:40:00+00:00", "finished_at": "...", "duration_s": 4.7,
   "study": {"path": "...", "dir": "...", "sha256": "...", "title": "...", "question": "...", "unit": "..."},
   "raw": "/abs/path/to/raw",
-  "sources": {"orders": {"file": "olist_orders_dataset.csv", "sha256": "...", "rows": 99441, "columns": ["..."]}},
+  "database": "run.duckdb",    // 运行结束时的工作数据库，可用 ew query RUN "SQL" 只读查询
+  "sources": {"orders": {"file": "olist_orders_dataset.csv", "sha256": "...", "rows": 99441, "columns": ["..."],
+                         "types": {"order_id": "VARCHAR", "order_purchase_timestamp": "TIMESTAMP"}, "encoding": "utf-8"}},
   "stages": [{
     "name": "2 整理与合并",
     "status": "passed",        // pending | running | passed | failed | needs_decision

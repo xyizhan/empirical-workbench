@@ -54,6 +54,9 @@ ew report runs/olist
 研究配置、运行记录与事件流的完整约定见 [docs/run-format.md](docs/run-format.md)。
 
 - **新研究**复制 studies/panel，先用 `ew validate STUDY` 检查配置。sources 声明输入文件及字段；stages 的 sql、checks、exports 描述变换、违规记录查询与导出。候选方案使用 candidates 数组，每项提供 name 与 sql。SQLite 保存点隔离尝试，失败后回滚并尝试下一项，保留证据。核验可写成 `{"sql": ..., "severity": "warn"}`，只提醒不阻断。
+- **数据格式**：来源可为 CSV/TSV（自动识别 UTF-8 或 GBK 编码）、Parquet；`pip install -e '.[formats]'` 后还可读写 Excel 与 Stata .dta。导出按扩展名写出 .csv、.csv.gz、.parquet、.dta、.xlsx。SQL 使用 DuckDB 方言，字段按真实类型读入，证券代码等前导零保持文本。
+- **先看数据**：`ew inspect RAW` 列出每个字段的类型、缺失、不同值个数与范围，并提示候选主键、前导零代码、被读成文本的数值；`--json` 供 Agent 读取。
+- **查询运行结果**：每次运行在输出目录保留 run.duckdb，`ew query RUN "select ..."` 可只读查询任意中间表，支持 `--format csv|json`。
 - **运行结果**写入 run.json（格式 `ew.run/1`）：每个阶段的状态、候选方案、核验违规行数与样例、各表行数变化和导出文件。运行状态为 passed、failed、needs_decision（口径待定）或 interrupted；未通过时命令以非零退出。
 - **新工具**在 tools 中声明，例如 `{"verify": {"argv": ["{python}","{study}/verify.py","{raw}","{out}"], "label": "独立复算"}}`。参数逐项传递，调用顺序与配置一致，输出写入同名 .log，失败阻止报告发布。配置和脚本可以执行本地代码，只运行信任的项目。
 - **报告**默认生成通用表格报告；研究可在 `"report": {"builder": "report.py"}` 提供自己的 `build(out, run)`，返回 Quarto markdown，Olist 的叙事报告即为此例。`ew report RUN --source-only` 只写出 report.qmd，不需要 Quarto。
