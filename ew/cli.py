@@ -52,6 +52,28 @@ def report(out):
     subprocess.run([str(Path(binary).resolve()),'render','report.qmd'],cwd=out,check=True)
 
 
+def prompt_decision(name, decision, out):
+    print(f'\n◆ 需要研究者选择 · {name}', flush=True)
+    if decision.get('evidence'):
+        with (out/decision['evidence']).open(newline='') as stream:
+            row = next(csv.DictReader(stream), {})
+        for field, label in decision.get('fields', {}).items():
+            print(f'  {label}  {row[field]}')
+    options = decision['options']
+    for index, value in enumerate(options, 1):
+        print(f"  [{index}] {decision.get('labels', {}).get(value, value)}  ({value})")
+    while True:
+        try:
+            answer = input('选择编号或口径名称 › ').strip()
+        except (EOFError, KeyboardInterrupt):
+            raise ValueError('研究者未选择口径，运行已停止') from None
+        for index, value in enumerate(options, 1):
+            if answer in (str(index), value):
+                decision['source'] = 'interactive'
+                return value
+        print('请从上列选项中选择。')
+
+
 def main():
     parser=argparse.ArgumentParser(prog='ew')
     cmds=parser.add_subparsers(dest='cmd',required=True)
@@ -62,6 +84,11 @@ def main():
     run.add_argument('--raw',required=True,type=Path)
     run.add_argument('--out',required=True,type=Path)
     run.add_argument('--decision',action='append',default=[],metavar='KEY=VALUE')
+    mode=run.add_mutually_exclusive_group()
+    mode.add_argument('--interactive', dest='interactive', action='store_true')
+    mode.add_argument('--batch', dest='interactive', action='store_false')
+    run.set_defaults(interactive=None)
+    run.add_argument('--report', action='store_true', help='核验后调用 Quarto')
     for name in ['view','report']:
         sub=cmds.add_parser(name)
         sub.add_argument('out',type=Path)
@@ -96,20 +123,39 @@ def main():
         return
     study=args.study.resolve()
     spec=json.loads(study.read_text())
+    explicit=set()
     for setting in args.decision:
         key,value=setting.split('=',1)
+        explicit.add(key)
         spec['decisions'][key]['value']=value or None
+        spec['decisions'][key]['source']='command-line'
     out.mkdir(parents=True,exist_ok=False)
     snapshot=out/'study.json'
     save(snapshot,spec)
     work=out/'processing'
     error=None
+    interactive = sys.stdin.isatty() if args.interactive is None else args.interactive
+    def emit(kind, message):
+        with (out/'events.jsonl').open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps({'event':kind,'message':message},ensure_ascii=False)+'\n')
+        if interactive:
+            if kind=='SQLite' and len(message)>108:
+                message=message[:105]+'…'
+            print(f'[{kind}] {message}', flush=True)
+    def choose(name, decision, directory):
+        if interactive and name not in explicit:
+            return prompt_decision(name, decision, directory)
+        return decision['value']
     try:
-        engine.run(SimpleNamespace(study=snapshot,out=work,raw=args.raw))
+        emit('研究问题', spec.get('question',study.stem))
+        engine.run(SimpleNamespace(study=snapshot,out=work,raw=args.raw),emit,choose)
         ctx=dict(python=sys.executable,study=str(study.parent),raw=str(args.raw.resolve()),out=str(work))
         for name,argv in spec.get('tools',{}).items():
-            result=subprocess.run([part.format_map(ctx) for part in argv],capture_output=True,text=True,timeout=300)
+            command=[part.format_map(ctx) for part in argv]
+            emit('调用工具', ' '.join(command))
+            result=subprocess.run(command,capture_output=True,text=True,timeout=300)
             (work/(name+'.log')).write_text(result.stdout+result.stderr)
+            emit('工具结果', (result.stdout+result.stderr).strip() or f'exit {result.returncode}')
             result.check_returncode()
     except Exception as exc:
         error=str(exc)
@@ -123,6 +169,10 @@ def main():
     dashboard(out)
     print(f'运行记录：{out}（ew view 查看）')
     if error: sys.exit(error)
+    if args.report:
+        emit('调用工具', 'Quarto · render report.qmd')
+        report(out)
+        emit('报告完成',str(out/'report.html'))
 
 if __name__=='__main__':
     main()

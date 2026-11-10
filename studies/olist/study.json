@@ -46,7 +46,19 @@
         "clock"
       ],
       "value": "calendar",
-      "basis": "沿用第三组 Report §2.4 自然日主口径；完整时点为敏感性比较。"
+      "default_basis": "沿用第三组 Report §2.4 自然日主口径；完整时点为敏感性比较。",
+      "labels": {
+        "calendar": "按自然日，当天签收算准时",
+        "clock": "按完整时间戳，晚于预计时刻算晚送"
+      },
+      "evidence": "口径比较.csv",
+      "fields": {
+        "denominator": "评分样本",
+        "late_day_n": "自然日口径晚送",
+        "late_clock_n": "时间戳口径晚送",
+        "switched": "两种定义换组",
+        "example": "边界订单"
+      }
     }
   },
   "stages": [

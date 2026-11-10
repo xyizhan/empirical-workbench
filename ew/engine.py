@@ -20,9 +20,10 @@ def dump(path, value):
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
 
 
-def load_inputs(db, spec, raw, log):
+def load_inputs(db, spec, raw, log, emit):
     for table, source in spec['sources'].items():
         path = raw / source['file']
+        emit('读取', path.name)
         with path.open(encoding='utf-8-sig', newline='') as stream:
             reader = csv.DictReader(stream)
             columns = source['columns']
@@ -34,9 +35,10 @@ def load_inputs(db, spec, raw, log):
                            (tuple(row[c] or None for c in columns) for row in reader))
         log['sources'][table] = dict(file=path.name, sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
                                      rows=db.execute(f'SELECT count(*) FROM {ident(table)}').fetchone()[0])
+        emit('已读取', f"{table} · {log['sources'][table]['rows']:,} 行")
 
 
-def run(args):
+def run(args, emit=lambda kind, message: None, choose=None):
     spec = json.loads(args.study.read_text())
     out = args.out
     out.mkdir(parents=True, exist_ok=False)
@@ -44,24 +46,30 @@ def run(args):
                sources={}, checks=[], attempts=[], completed=[], decisions=spec.get('decisions', {}))
     db = sqlite3.connect(':memory:')
     try:
-        load_inputs(db, spec, args.raw, log)
+        load_inputs(db, spec, args.raw, log, emit)
         for stage in spec['stages']:
             log['current'] = stage['name']
+            emit('阶段', stage['name'])
             plans = stage.get('candidates') or [{'name': 'main', 'sql': stage.get('sql', [])}]
             for plan in plans:
+                emit('执行方案', plan['name'])
                 db.execute('SAVEPOINT candidate')
                 checks = []
                 try:
                     for sql in plan['sql']:
+                        emit('SQLite', sql)
                         db.execute(sql)
                     for name, query in stage.get('checks', {}).items():
+                        emit('核验', name)
                         invalid = db.execute(query).fetchmany(5)
                         checks.append(dict(name=name, passed=not invalid, examples=invalid))
                         if invalid:
                             raise ValueError(f'{name}: {invalid}')
+                        emit('通过', name)
                 except (ValueError, sqlite3.Error) as exc:
                     db.execute('ROLLBACK TO candidate')
                     db.execute('RELEASE candidate')
+                    emit('已回滚', f"{plan['name']} · {exc}")
                     log['attempts'].append(dict(stage=stage['name'], plan=plan['name'], outcome='rejected', reason=str(exc), checks=checks))
                     if plan is plans[-1]:
                         log['checks'].extend(checks)
@@ -72,6 +80,7 @@ def run(args):
                     log['checks'].extend(checks)
                     break
             for name, query in stage.get('exports', {}).items():
+                emit('生成', name)
                 cursor = db.execute(query)
                 opener = gzip.open if name.endswith('.gz') else open
                 with opener(out/name, 'wt', encoding='utf-8', newline='') as stream:
@@ -81,6 +90,11 @@ def run(args):
             if 'decision' in stage:
                 name = stage['decision']
                 value = spec['decisions'][name]['value']
+                decision = spec['decisions'][name]
+                if choose:
+                    value = choose(name, decision, out)
+                    decision['value'] = value
+                emit('采用口径', f'{name} = {value}')
                 if value not in spec['decisions'][name]['options']:
                     raise ValueError(f'待研究者确定 {name}；见本次输出的口径比较表')
                 db.execute('CREATE TABLE decision(value TEXT)')

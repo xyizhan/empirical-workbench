@@ -23,3 +23,20 @@ class WorkflowTest(unittest.TestCase):
             self.assertEqual(log['status'],'passed')
             self.assertIn('2,-5.0',(out/'增长统计.csv').read_text())
             self.assertTrue((out/'index.html').is_file())
+
+    def test_interactive_decision_reaches_sql(self):
+        study = ROOT/'studies/panel'
+        spec = json.loads((study/'study.json').read_text())
+        spec['decisions'] = {'mode': {'options': ['first', 'second'], 'value': 'first'}}
+        spec['stages'][0]['decision'] = 'mode'
+        spec['stages'][-1]['exports']['choice.csv'] = 'select value from decision'
+        with tempfile.TemporaryDirectory() as td:
+            config = Path(td)/'study.json'
+            config.write_text(json.dumps(spec))
+            out = Path(td)/'out'
+            proc = subprocess.run([sys.executable, '-m', 'ew.cli', 'run', str(config),
+                                   '--raw', str(study), '--out', str(out), '--interactive'],
+                                  input='invalid\n2\n', text=True, capture_output=True, check=True)
+            self.assertIn('请从上列选项中选择', proc.stdout)
+            self.assertEqual((out/'choice.csv').read_text().splitlines(), ['value', 'second'])
+            self.assertEqual(json.loads((out/'run.json').read_text())['decisions']['mode']['source'], 'interactive')
