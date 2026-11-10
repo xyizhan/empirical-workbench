@@ -1,5 +1,5 @@
 {
-  "question": "已送达且有评分的订单中，准时与延误两组的订单平均评分如何分布？",
+  "question": "包裹比预计日期晚到，顾客给这一单的评分通常会低多少？",
   "unit": "一行一单，各订单等权",
   "sources": {
     "orders": {
@@ -81,8 +81,8 @@
       "classroom": {
         "done": [
           {
-            "title": "四张表如何对应一笔订单？",
-            "body": "共同匹配字段　order_id\n目标粒度　一行一单。同一订单在明细表可以出现多次。",
+            "title": "为什么订单数和商品记录数对不上？",
+            "body": "把四份文件想成四本账。同一笔购物在订单账上记一次；买两件商品，商品账上就会有两行。下面最后一列是每本账里能找到多少个不同的订单号。\n",
             "tables": [
               {
                 "sql": "select '订单' 来源关系,'一笔订单' 每行代表,count(*) 原表行数,count(distinct order_id) 覆盖订单 from orders union all select '├ 商品' 来源关系,'一条商品明细' 每行代表,count(*) 原表行数,count(distinct order_id) 覆盖订单 from items union all select '├ 支付' 来源关系,'一次支付' 每行代表,count(*) 原表行数,count(distinct order_id) 覆盖订单 from payments union all select '└ 评价' 来源关系,'一条评价' 每行代表,count(*) 原表行数,count(distinct order_id) 覆盖订单 from reviews"
@@ -92,7 +92,8 @@
                 "detail": true
               }
             ],
-            "next": "尝试连接"
+            "next": "尝试连接",
+            "lesson": "下一步用订单号把四本账对起来。一个订单最终只占一行，买得多的顾客也只算一单。"
           }
         ]
       }
@@ -134,30 +135,32 @@
       "classroom": {
         "rejected": [
           {
-            "title": "× 合并失败 · 一笔订单被展开",
-            "body": "两件商品分别匹配两次支付。按 E 检查同一笔支付出现在哪两行。",
+            "title": "买了两件商品，怎么会多算一倍的钱？",
+            "body": "程序刚试着把商品和支付明细直接拼起来。下面这单买了两件商品、付了两次款；每次支付都跟两件商品配了一遍。\n金额单位为巴西雷亚尔。\n",
             "tables": [
               {
-                "sql": "with chosen as (select order_id from base where item_n=2 and payment_n=2 group by order_id having count(*)>1 order by order_id limit 1), pairs as (select i.order_id,i.order_item_id item,p.payment_sequential seq,p.payment_value amount from chosen join items i using(order_id) join payments p using(order_id)) select order_id 触发问题的订单,count(*) 连接行数,(select round(paid_cents/100.0,2) from pay where order_id=pairs.order_id) 原支付额,round(sum(amount),2) 展开后合计 from pairs group by order_id"
+                "sql": "with chosen as (select order_id from base where item_n=2 and payment_n=2 group by order_id having count(*)>1 order by order_id limit 1), pairs as (select i.order_id,i.order_item_id item,p.payment_sequential seq,p.payment_value amount from chosen join items i using(order_id) join payments p using(order_id)) select count(*) 连接行数,(select round(paid_cents/100.0,2) from pay where order_id=pairs.order_id) 买家实付,round(sum(amount),2) 错误合计 from pairs group by order_id"
               },
               {
                 "sql": "with chosen as (select order_id from base where item_n=2 and payment_n=2 group by order_id having count(*)>1 order by order_id limit 1), pairs as (select i.order_id,i.order_item_id item,p.payment_sequential seq,p.payment_value amount from chosen join items i using(order_id) join payments p using(order_id)) select item 商品序号,seq 支付序号,amount 支付金额 from pairs order by item,seq",
                 "detail": true
               }
             ],
-            "next": "回滚并执行分表汇总"
+            "next": "回滚并执行分表汇总",
+            "lesson": "下一步撤销这次拼接。先给每笔订单算一个支付总额，再将总额放回订单。"
           }
         ],
         "done": [
           {
-            "title": "✓ 先汇总，再连接",
-            "body": "分别将商品、支付、评价汇总到订单粒度，再与订单主表左连接。",
+            "title": "改完以后，每笔订单还在吗？",
+            "body": "程序已经把商品和支付分别加总，再按订单号拼回去。现在做两次点数，再把所有支付和原账核对。\n",
             "tables": [
               {
                 "sql": "select count(*) 合并行数,count(distinct order_id) 不同订单数,sum(paid_cents)-(select sum(cast(round(payment_value*100) as integer)) from payments) 支付差额_分 from base"
               }
             ],
-            "next": "检查字段适用条件"
+            "next": "检查字段适用条件",
+            "lesson": "两次点数相同，支付差额为零。接下来要判断这些订单什么时候送到。"
           }
         ]
       }
@@ -178,8 +181,8 @@
       "classroom": {
         "done": [
           {
-            "title": "缺少签收时间，影响哪些指标？",
-            "body": "已送达却缺签收的记录保留在全表，计算履约时长时排除。",
+            "title": "没填签收日期，能算晚送吗？",
+            "body": "想知道包裹晚了几天，需要知道买家哪天收到它。我们先按订单状态数一遍，看看哪些单本该有这个日期。\n",
             "tables": [
               {
                 "sql": "select case when order_status='delivered' then '已送达' else '其他状态' end 状态,count(*) 订单数,sum(order_delivered_customer_date is null) 缺签收 from quality group by 1"
@@ -189,7 +192,8 @@
                 "detail": true
               }
             ],
-            "next": "构造变量与样本"
+            "next": "构造变量与样本",
+            "lesson": "状态写着“已送达”却缺日期的订单仍保存在总表。比较准时和晚送时把它们单独放下。"
           }
         ]
       }
@@ -208,8 +212,8 @@
       "classroom": {
         "done": [
           {
-            "title": "哪些订单可以比较评分？",
-            "body": "每行沿用上一步保留的订单。按 E 查看同一天签收的边界单。",
+            "title": "从所有订单里，挑出能回答问题的那些单",
+            "body": "从第一行往下读：先找已送达的单，再要求有足够日期判断准时与否，最后要求买家给过分。右列显示这一步少了多少单。\n",
             "tables": [
               {
                 "sql": "with n as (select count(*) a,sum(order_status='delivered') b,sum(quality='eligible') c,sum(rated) d from candidates) select '① 所有订单' 筛选步骤,a 保留订单,0 本步排除 from n union all select '  ② 已送达',b,a-b from n union all select '    ③ 可计算履约',c,b-c from n union all select '      ④ 有评分',d,c-d from n"
@@ -219,7 +223,8 @@
                 "detail": true
               }
             ],
-            "next": "进入研究者口径选择"
+            "next": "进入研究者口径选择",
+            "lesson": "还剩一个决定：预计今天到、今天傍晚签收，算不算迟？下一屏由你选，后面的图表就按你的答案重算。"
           }
         ]
       }
@@ -245,28 +250,47 @@
       "classroom": {
         "done": [
           {
-            "title": "差距缩小，变的是样本还是评分？",
-            "body": "A 与 C 同时改变了订单范围和评分定义。下一屏固定 B、C 的订单集合。",
+            "title": "准时到的包裹和晚到的包裹，各得了几分？",
+            "body": "一单有多条评价时，先算这一单的平均分。再让每单占一票，分别计算两组的平均分。\n",
             "tables": [
               {
-                "sql": "with g as (select branch,sum(late=0) ontime,sum(late=1) late_n,avg(case when late=0 then score end)-avg(case when late=1 then score end) gap from branches group by branch) select case branch when 'A' then 'A 全部订单评分样本' when 'B' then 'B 固定送达后有评价样本' else 'C 同样本仅取送达后评分' end 比较,ontime 准时订单,late_n 晚送订单,round(gap,3) 均分差,substr('████████████████████████████████████████',1,round(abs(gap)*8)) 差距 from g where branch in ('A','C') order by branch"
+                "sql": "with g as (select branch,sum(late=0) n0,sum(late=1) n1,avg(case when late=0 then score end) a,avg(case when late=1 then score end) b from branches group by branch) select *,a-b gap from g where branch='A'",
+                "explain": "准时的 {n0:,} 单平均 {a:.2f} 分；晚送的 {n1:,} 单平均 {b:.2f} 分。两组相差 {gap:.3f} 分。"
               }
             ],
-            "next": "揭示固定样本对照"
+            "next": "看看收货后给的分",
+            "lesson": "有些买家在包裹送到之前就给了分。如果只看收货后的评价，差距还会这么大吗？"
           },
           {
-            "title": "固定样本后，评分口径改变了多少？",
-            "body": "先沿 A → B 看筛选样本的变化，再沿 B → C 看同批订单换评分的变化。",
+            "title": "只看收货后的评价，发生了什么？",
+            "body": "程序对照了评价时间和签收时间。没有收货后评价的订单先放下；留下的订单，只用收货后给的分。",
             "tables": [
               {
-                "sql": "with g as (select branch,sum(late=0) ontime,sum(late=1) late_n,avg(case when late=0 then score end)-avg(case when late=1 then score end) gap from branches group by branch) select case branch when 'A' then 'A 全部订单评分样本' when 'B' then 'B 固定送达后有评价样本' else 'C 同样本仅取送达后评分' end 比较,ontime 准时订单,late_n 晚送订单,round(gap,3) 均分差,substr('████████████████████████████████████████',1,round(abs(gap)*8)) 差距 from g where branch in ('A','B','C') order by branch"
+                "sql": "with g as (select branch,sum(late=0) n0,sum(late=1) n1,avg(case when late=0 then score end) a,avg(case when late=1 then score end) b from branches group by branch) select *,a-b gap from g where branch='C'",
+                "explain": "这次还剩 {n0:,} 单准时、{n1:,} 单晚送。准时组平均 {a:.2f} 分，晚送组 {b:.2f} 分，相差 {gap:.3f} 分。"
+              }
+            ],
+            "lesson": "刚才同时改了两件事：留下哪些订单，以及每单用哪些评分。下一步拿同一批订单算两遍，把两个原因拆开。",
+            "next": "拆开这两个原因"
+          },
+          {
+            "title": "差距为什么变小了？",
+            "body": "下表每行都用「准时组平均分减去晚送组平均分」。先换订单，再换评分。\n",
+            "tables": [
+              {
+                "sql": "with g as (select branch,sum(late=0) n0,sum(late=1) n1,avg(case when late=0 then score end) a,avg(case when late=1 then score end) b from branches group by branch) select case branch when 'A' then '所有能比较的订单' when 'B' then '仅留有收货后评价的单' else '沿用上一行的订单' end 用哪些订单,case branch when 'C' then '仅收货后' else '所有评价' end 用哪些评分,round(a-b,3) 相差几分 from g order by branch"
+              },
+              {
+                "sql": "with g as (select branch,sum(late=0) n0,sum(late=1) n1,avg(case when late=0 then score end) a,avg(case when late=1 then score end) b from branches group by branch) select x.a-x.b original,y.a-y.b fixed,z.a-z.b post from g x,g y,g z where x.branch='A' and y.branch='B' and z.branch='C'",
+                "explain": "只换订单，差距就从 {original:.3f} 降到 {fixed:.3f} 分。保留这些订单再换评分，差距是 {post:.3f} 分。这批数据里，变化主要来自哪些订单被留下。"
               },
               {
                 "sql": "select count(*) as B与C成员不一致订单数 from (select order_id from branches where branch in ('B','C') group by order_id having count(distinct branch)!=2)",
                 "detail": true
               }
             ],
-            "next": "运行独立复算工具"
+            "next": "从原始记录重新核对",
+            "lesson": "这说明两组顾客打分有差别。单凭这次比较，还不能断定包裹晚到导致了多少分的下降。"
           }
         ]
       }
@@ -278,6 +302,19 @@
       "{study}/verify.py",
       "{raw}",
       "{out}"
+    ]
+  },
+  "guide": {
+    "title": "一次网购，从下单到打分　·　巴西 Olist 订单",
+    "opening": "假如你买了两件商品，最后给这笔订单打了几分？",
+    "context": "Olist 是巴西的电商平台。这批数据记录了买家下单、买了什么、怎样付款，以及后来给了几分。顾客评分从 1 到 5，5 分最高。\n",
+    "route": "\n我们先把同一单的记录找齐，判断包裹有没有晚到，再把准时和晚送的订单分开算平均分。",
+    "steps": [
+      "认出同一笔订单",
+      "把四本账合在一起",
+      "找出缺少签收日期的订单",
+      "决定哪些订单算晚送",
+      "比较买家打了几分"
     ]
   }
 }

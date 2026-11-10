@@ -186,6 +186,8 @@ def main():
         emit('调用工具', 'Quarto · render report.qmd')
         report(out, quiet=classroom)
         emit('报告完成',str(out/'report.html'))
+    if presenter:
+        presenter.finish(out)
 
 if __name__=='__main__':
     main()

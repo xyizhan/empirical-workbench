@@ -27,18 +27,18 @@ class Classroom:
         self.spec = spec
         self.emit = emit
         self.names = [stage['name'] for stage in spec['stages']]
+        self.guide = spec.get("guide", {})
+        self.takeaway = ""
         self.position = -1
         self.sql = []
         self.notes = []
 
     def header(self):
         self.console.clear()
-        self.console.print('EMPIRICAL WORKBENCH   /   现场研究', style='bold cyan')
-        nav = Text()
-        for i, name in enumerate(self.names):
-            marker = '✓' if i < self.position else '●' if i == self.position else '○'
-            nav.append(f'{marker} {name}   ', style='bold cyan' if i == self.position else 'green' if i < self.position else 'dim')
-        self.console.print(nav)
+        self.console.print(self.guide.get('title','Empirical Workbench'),style='bold cyan')
+        labels=self.guide.get('steps',self.names)
+        if 0 <= self.position < len(labels):
+            self.console.print(f'第 {self.position+1}/{len(labels)} 步　{labels[self.position]}',style='bold green')
         self.console.rule(style='cyan')
 
     def event(self, kind, message):
@@ -78,8 +78,20 @@ class Classroom:
             mode = '' if mode == key else key
 
     def intro(self):
-        self.present('研究问题', [Text(self.spec.get('question','开始新研究'),style='bold'),
-            Text('\n'+'\n'.join(self.names)),Text('\n输入：原始表    交付：分析数据、统计底表与核验记录')],hint='读取原始表')
+        self.present(self.guide.get('opening','研究问题'), [
+            Text(self.guide.get('context','')),
+            Text(self.spec.get('question','开始新研究'), style='bold cyan'),
+            Text(self.guide.get('route',' → '.join(self.names)))
+        ],hint='看看原始记录')
+
+    def finish(self, out):
+        self.position=len(self.names)
+        self.header()
+        self.console.print(Panel(Text(self.takeaway or '各阶段已完成。'), title='今天从这批记录里看到了什么？',padding=(1,2)))
+        self.console.print('独立核验已完成。' if self.spec.get('tools',{}).get('verify') else '处理完成。')
+        if (out/'report.html').exists():
+            self.console.print('用浏览器打开报告：',style='cyan')
+            self.console.print(str(out/'report.html'),soft_wrap=True)
 
     def checkpoint(self, db, stage, when, failure=None):
         pages = stage.get('classroom',{}).get(when,[])
@@ -97,12 +109,19 @@ class Classroom:
                 rows=cursor.fetchmany(12)
                 columns=[col[0] for col in cursor.description]
                 self.emit('展示证据',dict(stage=stage['name'],title=page['title'],sql=sql,columns=columns,rows=rows))
+                if query.get('explain') and rows:
+                    sentence=query['explain'].format_map(dict(zip(columns,rows[0])))
+                    blocks.extend([Text(''),Text(sentence,style='bold green')])
+                    self.takeaway=sentence
+                    continue
                 table=Table(show_edge=False,header_style='bold cyan',pad_edge=False)
                 for col in columns:
                     table.add_column(col,overflow='fold')
                 for row in rows:
                     table.add_row(*(Text(str(x) if x is not None else '缺失') for x in row))
                 (details if query.get('detail') else blocks).append(table)
+            if page.get('lesson'):
+                blocks.extend([Text(''),Text(page['lesson'],style='green')])
             if self.notes:
                 details.insert(0,Text('已通过检查',style='bold green'))
             self.present(page['title'],blocks,details,page.get('next','继续执行'))
