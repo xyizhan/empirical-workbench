@@ -9,7 +9,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 <p align="center"><img src="docs/assets/demo.gif" alt="Empirical Workbench 演示" width="860"></p>
-<p align="center"><a href="docs/assets/demo.mp4">▶ 观看高清演示视频（17 秒）</a></p>
+<p align="center"><a href="docs/assets/demo.mp4">▶ 观看高清宣传片（21 秒，1080p）</a></p>
 
 ## 为什么需要它
 
@@ -133,6 +133,8 @@ cd frontend && npm install && npm run build   # 修改网页前端后重新构�
 ```
 
 前端用 Vite + Preact，构建产物随 Python 包发布，使用者无需安装 Node。
+
+宣传片源码在 [promo/](promo/)（Remotion）：`cd promo && npm install && npm run render`，素材是网页工作台的真实截图。
 
 ## 路线图
 
