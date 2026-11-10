@@ -1,5 +1,6 @@
 """A presenter-paced terminal view over the live SQLite session."""
 import sys
+import webbrowser
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
@@ -90,8 +91,19 @@ class Classroom:
         self.console.print(Panel(Text(self.takeaway or '各阶段已完成。'), title='今天从这批记录里看到了什么？',padding=(1,2)))
         self.console.print('独立核验已完成。' if self.spec.get('tools',{}).get('verify') else '处理完成。')
         if (out/'report.html').exists():
-            self.console.print('用浏览器打开报告：',style='cyan')
-            self.console.print(str(out/'report.html'),soft_wrap=True)
+            path = out/'report.html'
+            self.console.print('按 O 在默认浏览器打开研究报告，或按回车返回终端。', style='bold cyan')
+            while True:
+                key = keypress().lower()
+                if key == 'o':
+                    if webbrowser.open(path.resolve().as_uri()):
+                        self.console.print('已请求浏览器打开报告。')
+                    else:
+                        self.console.print('请在浏览器中打开本地文件：', path.as_posix())
+                    break
+                if key in ('q', ' ', '\r', '\n', '\x03', '\x04', ''):
+                    break
+            self.console.print('报告位置：', path.as_posix(), soft_wrap=True)
 
     def checkpoint(self, db, stage, when, failure=None):
         pages = stage.get('classroom',{}).get(when,[])
