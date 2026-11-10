@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "empirical-workbench"
-version = "0.2.0"
+dynamic = ["version"]
 dependencies = ["rich>=13,<16"]
 description = "Evidence-driven empirical data workflows with a local visual console"
 requires-python = ">=3.10"
@@ -15,5 +15,15 @@ ew = "ew.cli:main"
 [tool.setuptools]
 packages = ["ew"]
 
+[tool.setuptools.dynamic]
+version = {attr = "ew.__version__"}
+
 [tool.setuptools.package-data]
 ew = ["console.html"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 160
+
+[tool.ruff.lint]
+select = ["F", "E9"]

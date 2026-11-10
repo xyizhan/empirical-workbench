@@ -51,10 +51,14 @@ ew report runs/olist
 
 ## 扩展项目
 
-- **新研究**复制 studies/panel。sources 声明输入文件及字段；stages 的 sql、checks、exports 描述变换、违规记录查询与导出。候选方案使用 candidates 数组，每项提供 name 与 sql。SQLite 保存点隔离尝试，失败后回滚并尝试下一项，保留证据。
-- **新工具**在研究配置的 tools 中声明命名参数数组，例如 `["{python}","{study}/verify.py","{raw}","{out}"]`。参数逐项传递，调用顺序与配置一致，输出写入日志，失败阻止报告发布。配置和脚本可以执行本地代码，只运行信任的项目。工具的输出目录参数指向本次处理目录。
-- **AI 调度**将 skills/empirical-workbench 提供给宿主 Agent。CLI 的命令、源码、检查与日志均可独立使用。当前内核依赖 Python 标准库；模型推理由宿主负责。Olist 内置候选连接和探索分支用于可重复教学；它们在配置中预定义。
-- **验收**运行 `python -m unittest discover -s tests`。每次运行使用新目录，主表与中间计算在同一 SQLite 会话内生成。当前支持整次重跑，跨进程增量缓存、自由生成分支及跨项目自动升级尚属后续工作。
+研究配置、运行记录与事件流的完整约定见 [docs/run-format.md](docs/run-format.md)。
+
+- **新研究**复制 studies/panel，先用 `ew validate STUDY` 检查配置。sources 声明输入文件及字段；stages 的 sql、checks、exports 描述变换、违规记录查询与导出。候选方案使用 candidates 数组，每项提供 name 与 sql。SQLite 保存点隔离尝试，失败后回滚并尝试下一项，保留证据。核验可写成 `{"sql": ..., "severity": "warn"}`，只提醒不阻断。
+- **运行结果**写入 run.json（格式 `ew.run/1`）：每个阶段的状态、候选方案、核验违规行数与样例、各表行数变化和导出文件。运行状态为 passed、failed、needs_decision（口径待定）或 interrupted；未通过时命令以非零退出。
+- **新工具**在 tools 中声明，例如 `{"verify": {"argv": ["{python}","{study}/verify.py","{raw}","{out}"], "label": "独立复算"}}`。参数逐项传递，调用顺序与配置一致，输出写入同名 .log，失败阻止报告发布。配置和脚本可以执行本地代码，只运行信任的项目。
+- **报告**默认生成通用表格报告；研究可在 `"report": {"builder": "report.py"}` 提供自己的 `build(out, run)`，返回 Quarto markdown，Olist 的叙事报告即为此例。`ew report RUN --source-only` 只写出 report.qmd，不需要 Quarto。
+- **AI 调度**将 skills/empirical-workbench 提供给宿主 Agent。CLI 的命令、源码、检查与日志均可独立使用；模型推理由宿主负责。Olist 内置候选连接和探索分支用于可重复教学；它们在配置中预定义。
+- **验收**运行 `python -m unittest discover -s tests` 与 `ruff check .`。本地有 Olist 数据时（`../data/raw` 或 `OLIST_RAW`）测试会额外跑通 Olist 全流程与独立复算。
 
 ## 课堂演示顺序
 

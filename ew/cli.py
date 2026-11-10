@@ -1,74 +1,44 @@
-"""Command line and external tool boundary for Empirical Workbench."""
+"""Command line for Empirical Workbench."""
 import argparse
 import csv
 import importlib.resources
 import json
-import os
-import shutil
 import subprocess
 import sys
+import time
 import webbrowser
+from itertools import islice
 from pathlib import Path
-from types import SimpleNamespace
-from . import engine
+
+from . import __version__, engine, record, report, study as studies
+from .record import EVENTS, DecisionRequired, Interrupted, Recorder
 from .terminal import show_run
 
-
-def save(path, obj):
-    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2))
+PREVIEW_ROWS = 50
 
 
 def dashboard(out):
-    manifest=json.loads((out/'run.json').read_text())
-    tables={}
-    for file in sorted(out.glob('*.csv')):
-        with file.open(newline='') as stream:
-            reader=csv.reader(stream)
-            from itertools import islice
-            tables[file.name]=list(islice(reader,51))
-    payload=json.dumps(dict(run=manifest,tables=tables),ensure_ascii=False).replace('<','\\u003c')
-    template=importlib.resources.files('ew').joinpath('console.html').read_text()
-    (out/'index.html').write_text(template.replace('__PAYLOAD__',payload))
-
-
-def report(out, quiet=False):
-    log=json.loads((out/'run.json').read_text())
-    if log['status']!='passed':
-        raise ValueError('Only verified runs can render a report')
-    if '延误定义' in log.get('decisions', {}) and (out/'探索对照.csv').exists():
-        from .olist_report import manuscript
-        source = manuscript(out, log)
-    else:
-        source = tabular_report(out, log)
-    (out/'report.qmd').write_text(source, encoding='utf-8')
-    binary=shutil.which(os.environ.get('QUARTO_BIN','quarto'))
-    if not binary:
-        sys.exit('生成报告需要 Quarto CLI。请安装或设置 QUARTO_BIN 指向可执行文件。')
-    with (out/'quarto.log').open('w') as stream:
-        subprocess.run([str(Path(binary).resolve()),'render','report.qmd'],cwd=out,check=True,stdout=stream if quiet else None,stderr=subprocess.STDOUT if quiet else None)
-
-
-def tabular_report(out, log):
-    lines=['---','title: "Empirical Workbench · 研究报告"','format:','  html:','    embed-resources: true','---','',log.get('question',''), '']
-    for path in sorted(out.glob('*.csv')):
-        with path.open(newline='') as stream:
-            from itertools import islice
-            rows=list(islice(csv.reader(stream),31))
-        if rows:
-            lines+=['## '+path.stem,'','预览至多 30 行。','']
-            rows.insert(1,['---']*len(rows[0]))
-            lines.extend('| '+' | '.join(x.replace('|','\\|').replace('\n',' ') for x in row)+' |' for row in rows)
-            lines.append('')
-    return '\n'.join(lines)
+    """Write the offline single-file viewer index.html for a run directory."""
+    run = json.loads((out / 'run.json').read_text(encoding='utf-8'))
+    tables = {}
+    for stage in run['stages']:
+        for item in stage['exports']:
+            path = out / item['file']
+            if path.suffix == '.csv' and path.is_file():
+                with path.open(newline='', encoding='utf-8') as stream:
+                    tables[item['file']] = list(islice(csv.reader(stream), PREVIEW_ROWS + 1))
+    payload = json.dumps(dict(run=run, tables=tables, labels=EVENTS), ensure_ascii=False, default=str).replace('<', '\\u003c')
+    template = importlib.resources.files('ew').joinpath('console.html').read_text(encoding='utf-8')
+    (out / 'index.html').write_text(template.replace('__PAYLOAD__', payload), encoding='utf-8')
 
 
 def prompt_decision(name, decision, out):
     print(f'\n◆ 需要研究者选择 · {name}', flush=True)
-    if decision.get('evidence'):
-        with (out/decision['evidence']).open(newline='') as stream:
+    if decision.get('evidence') and (out / decision['evidence']).is_file():
+        with (out / decision['evidence']).open(newline='', encoding='utf-8') as stream:
             row = next(csv.DictReader(stream), {})
         for field, label in decision.get('fields', {}).items():
-            print(f'  {label}  {row[field]}')
+            print(f'  {label}  {row.get(field, "")}')
     options = decision['options']
     for index, value in enumerate(options, 1):
         print(f"  [{index}] {decision.get('labels', {}).get(value, value)}  ({value})")
@@ -76,7 +46,7 @@ def prompt_decision(name, decision, out):
         try:
             answer = input('选择编号或口径名称 › ').strip()
         except (EOFError, KeyboardInterrupt):
-            raise ValueError('研究者未选择口径，运行已停止') from None
+            raise Interrupted('研究者未选择口径，运行已停止') from None
         for index, value in enumerate(options, 1):
             if answer in (str(index), value):
                 decision['source'] = 'interactive'
@@ -84,119 +54,171 @@ def prompt_decision(name, decision, out):
         print('请从上列选项中选择。')
 
 
-def main():
-    parser=argparse.ArgumentParser(prog='ew')
-    cmds=parser.add_subparsers(dest='cmd',required=True)
-    inspect=cmds.add_parser('inspect')
-    inspect.add_argument('raw',type=Path)
-    run=cmds.add_parser('run', aliases=['demo'])
-    run.add_argument('study',type=Path)
-    run.add_argument('--raw',required=True,type=Path)
-    run.add_argument('--out',required=True,type=Path)
-    run.add_argument('--decision',action='append',default=[],metavar='KEY=VALUE')
-    mode=run.add_mutually_exclusive_group()
-    mode.add_argument('--interactive', dest='interactive', action='store_true')
-    mode.add_argument('--batch', dest='interactive', action='store_false')
-    run.set_defaults(interactive=None)
-    run.add_argument('--report', action='store_true', help='核验后调用 Quarto')
-    for name in ['view','report']:
-        sub=cmds.add_parser(name)
-        sub.add_argument('out',type=Path)
-        if name=='view':
-            sub.add_argument('--web',action='store_true')
-    args=parser.parse_args()
-    if args.cmd=='inspect':
-        profile={}
-        for path in sorted(args.raw.glob('*.csv')):
-            with path.open(newline='', encoding='utf-8-sig') as f:
-                reader=csv.DictReader(f)
-                fields=reader.fieldnames or []
-                nulls=dict.fromkeys(fields,0)
-                count=0
-                for row in reader:
-                    count+=1
-                    for field in fields:
-                        if not row[field]: nulls[field]+=1
-                profile[path.name]=dict(rows=count,missing=nulls)
-        print(json.dumps(profile,ensure_ascii=False,indent=2))
-        return
-    out=args.out.resolve()
-    if args.cmd=='report':
-        report(out)
-        return
-    if args.cmd=='view':
-        if args.web:
-            dashboard(out)
-            webbrowser.open((out/'index.html').as_uri())
-        else:
-            show_run(out)
-        return
-    study=args.study.resolve()
-    spec=json.loads(study.read_text())
-    explicit=set()
+def printer(event):
+    message = event['message']
+    if event['kind'] == 'sql' and len(message) > 108:
+        message = message[:105] + '…'
+    print(f'[{EVENTS[event["kind"]]}] {message}', flush=True)
+
+
+def run_tools(spec, study_dir, raw, out, run, emit, save):
+    ctx = dict(python=sys.executable, study=str(study_dir), raw=str(raw.resolve()), out=str(out))
+    for name, tool in spec['tools'].items():
+        argv = [part.format_map(ctx) for part in tool['argv']]
+        entry = dict(name=name, label=tool['label'], argv=argv, returncode=None, log=f'{name}.log', duration_s=None)
+        run['tools'].append(entry)
+        save()
+        emit('tool.start', ' '.join(argv), name=name, label=tool['label'])
+        started = time.perf_counter()
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=300)
+        output = result.stdout + result.stderr
+        (out / entry['log']).write_text(output, encoding='utf-8')
+        entry.update(returncode=result.returncode, duration_s=round(time.perf_counter() - started, 3))
+        emit('tool.end', output.strip() or f'exit {result.returncode}', name=name, returncode=result.returncode)
+        if result.returncode:
+            raise RuntimeError(f'工具 {name} 失败（exit {result.returncode}），见 {entry["log"]}')
+
+
+def cmd_run(args, parser):
+    study_path = args.study.resolve()
+    spec = studies.load(study_path)
+    explicit = set()
     for setting in args.decision:
-        key,value=setting.split('=',1)
+        key, sep, value = setting.partition('=')
+        if not sep or key not in spec['decisions']:
+            parser.error(f'--decision 需要 KEY=VALUE，KEY 为研究配置中的口径：{", ".join(spec["decisions"]) or "（无）"}')
+        if value and value not in spec['decisions'][key]['options']:
+            parser.error(f'口径 {key} 的可选值为 {", ".join(spec["decisions"][key]["options"])}')
         explicit.add(key)
-        spec['decisions'][key]['value']=value or None
-        spec['decisions'][key]['source']='command-line'
-    classroom = args.cmd=='demo'
+        spec['decisions'][key].update(value=value or None, source='command-line')
+    classroom = args.cmd == 'demo'
     if classroom and not (sys.stdin.isatty() and sys.stdout.isatty()):
         parser.error('ew demo 需要交互终端；自动化请使用 ew run --batch')
-    out.mkdir(parents=True,exist_ok=False)
-    snapshot=out/'study.json'
-    save(snapshot,spec)
-    work=out/'processing'
-    error=None
+    out = args.out.resolve()
+    try:
+        out.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        parser.error(f'输出目录已存在：{out}。每次运行请使用新目录')
+    record.save_json(out / 'study.json', spec)
+
     interactive = sys.stdin.isatty() if args.interactive is None else args.interactive
-    def emit(kind, message):
-        with (out/'events.jsonl').open('a', encoding='utf-8') as stream:
-            stream.write(json.dumps({'event':kind,'message':message},ensure_ascii=False)+'\n')
-        if presenter:
-            presenter.event(kind,message)
-        elif interactive:
-            if kind=='SQLite' and len(message)>108:
-                message=message[:105]+'…'
-            print(f'[{kind}] {message}', flush=True)
-    presenter=None
+    run = record.new_run(study_path, spec, args.raw.resolve())
+    recorder = Recorder(out, run)
+    presenter = None
     if classroom:
         from .demo import Classroom
-        presenter=Classroom(spec,emit)
-        interactive=True
+        presenter = Classroom(spec, recorder.emit)
+        recorder.listeners.append(presenter.event)
+        interactive = True
+    elif interactive:
+        recorder.listeners.append(printer)
+
     def choose(name, decision, directory):
         if interactive and name not in explicit:
             return prompt_decision(name, decision, directory)
         return decision['value']
+
+    recorder.save()
+    status, reason = record.PASSED, None
     try:
         if presenter:
             presenter.intro()
-        emit('研究问题', spec.get('question',study.stem))
-        engine.run(SimpleNamespace(study=snapshot,out=work,raw=args.raw),emit,choose,presenter.checkpoint if presenter else None)
-        ctx=dict(python=sys.executable,study=str(study.parent),raw=str(args.raw.resolve()),out=str(work))
-        for name,argv in spec.get('tools',{}).items():
-            command=[part.format_map(ctx) for part in argv]
-            emit('调用工具', ' '.join(command))
-            result=subprocess.run(command,capture_output=True,text=True,timeout=300)
-            (work/(name+'.log')).write_text(result.stdout+result.stderr)
-            emit('工具结果', (result.stdout+result.stderr).strip() or f'exit {result.returncode}')
-            result.check_returncode()
+        recorder.emit('run.start', spec.get('question') or run['study']['title'])
+        engine.run(spec, args.raw, out, run, recorder.emit, choose,
+                   presenter.checkpoint if presenter else None, recorder.save)
+        recorder.save()
+        run_tools(spec, study_path.parent, args.raw, out, run, recorder.emit, recorder.save)
+    except DecisionRequired as exc:
+        status, reason = record.NEEDS_DECISION, str(exc)
+    except (Interrupted, KeyboardInterrupt) as exc:
+        status, reason = record.INTERRUPTED, str(exc) or '运行被中断'
     except Exception as exc:
-        error=str(exc)
-    if work.exists():
-        for file in work.iterdir(): shutil.move(str(file),out/file.name)
-        work.rmdir()
-    log=json.loads((out/'run.json').read_text()) if (out/'run.json').exists() else {}
-    log.update(question=spec.get('question',''),stages=[s['name'] for s in spec['stages']])
-    if error: log.update(status='stopped',reason=error)
-    save(out/'run.json',log)
+        status, reason = record.FAILED, str(exc)
+    recorder.finish(status, reason)
     dashboard(out)
     print(f'运行记录：{out}（ew view 查看）')
-    if error: sys.exit(error)
+    if status != record.PASSED:
+        sys.exit(reason)
     if args.report:
-        emit('调用工具', 'Quarto · render report.qmd')
-        report(out, quiet=classroom)
-        emit('报告完成',str(out/'report.html'))
+        try:
+            report.render(out, quiet=classroom)
+        except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+            sys.exit(f'报告未生成：{exc}')
+        dashboard(out)
     if presenter:
         presenter.finish(out)
 
-if __name__=='__main__':
+
+def cmd_inspect(args):
+    profile = {}
+    for path in sorted(args.raw.glob('*.csv')):
+        with path.open(newline='', encoding='utf-8-sig') as stream:
+            reader = csv.DictReader(stream)
+            fields = reader.fieldnames or []
+            nulls = dict.fromkeys(fields, 0)
+            count = 0
+            for row in reader:
+                count += 1
+                for field in fields:
+                    if not row[field]:
+                        nulls[field] += 1
+            profile[path.name] = dict(rows=count, missing=nulls)
+    print(json.dumps(profile, ensure_ascii=False, indent=2))
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog='ew', description='Empirical Workbench：可核验的实证数据处理工作台')
+    parser.add_argument('--version', action='version', version=f'ew {__version__}')
+    cmds = parser.add_subparsers(dest='cmd', required=True)
+    inspect = cmds.add_parser('inspect', help='概览目录中 CSV 的行数与缺失')
+    inspect.add_argument('raw', type=Path)
+    validate = cmds.add_parser('validate', help='检查研究配置，不读取数据')
+    validate.add_argument('study', type=Path)
+    run = cmds.add_parser('run', aliases=['demo'], help='执行研究（demo 为课堂投影模式）')
+    run.add_argument('study', type=Path)
+    run.add_argument('--raw', required=True, type=Path)
+    run.add_argument('--out', required=True, type=Path)
+    run.add_argument('--decision', action='append', default=[], metavar='KEY=VALUE')
+    mode = run.add_mutually_exclusive_group()
+    mode.add_argument('--interactive', dest='interactive', action='store_true')
+    mode.add_argument('--batch', dest='interactive', action='store_false')
+    run.set_defaults(interactive=None)
+    run.add_argument('--report', action='store_true', help='核验后生成报告（需要 Quarto）')
+    view = cmds.add_parser('view', help='查看一次运行')
+    view.add_argument('out', type=Path)
+    view.add_argument('--web', action='store_true')
+    rep = cmds.add_parser('report', help='为已通过的运行生成报告')
+    rep.add_argument('out', type=Path)
+    rep.add_argument('--source-only', action='store_true', help='只写出 report.qmd，不调用 Quarto')
+    args = parser.parse_args(argv)
+
+    try:
+        if args.cmd == 'inspect':
+            cmd_inspect(args)
+        elif args.cmd == 'validate':
+            spec = studies.load(args.study)
+            print(f'✓ {args.study}：{len(spec["sources"])} 个来源，{len(spec["stages"])} 个阶段，'
+                  f'{sum(len(s["checks"]) for s in spec["stages"])} 项核验，{len(spec["decisions"])} 个研究口径')
+        elif args.cmd in ('run', 'demo'):
+            cmd_run(args, parser)
+        elif args.cmd == 'view':
+            out = args.out.resolve()
+            record.load(out)
+            if args.web:
+                dashboard(out)
+                webbrowser.open((out / 'index.html').as_uri())
+            else:
+                show_run(out)
+        elif args.cmd == 'report':
+            out = args.out.resolve()
+            path = report.write_source(out) if args.source_only else report.render(out)
+            dashboard(out)
+            print(path)
+    except studies.StudyError as exc:
+        sys.exit(str(exc))
+    except (ValueError, FileNotFoundError, subprocess.CalledProcessError) as exc:
+        sys.exit(f'ew {args.cmd}：{exc}')
+
+
+if __name__ == '__main__':
     main()

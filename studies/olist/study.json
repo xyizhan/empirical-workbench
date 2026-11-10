@@ -297,12 +297,18 @@
     }
   ],
   "tools": {
-    "verify": [
-      "{python}",
-      "{study}/verify.py",
-      "{raw}",
-      "{out}"
-    ]
+    "verify": {
+      "argv": [
+        "{python}",
+        "{study}/verify.py",
+        "{raw}",
+        "{out}"
+      ],
+      "label": "Python · 从原始 CSV 独立复算"
+    }
+  },
+  "report": {
+    "builder": "report.py"
   },
   "guide": {
     "title": "一次网购，从下单到打分　·　巴西 Olist 订单",

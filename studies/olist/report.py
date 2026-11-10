@@ -1,9 +1,12 @@
-"""Build the reader-facing Quarto manuscript from a verified Olist run."""
+"""Olist study report builder: the reader-facing Quarto manuscript for a verified run.
+
+Loaded by ew via study.json {"report": {"builder": "report.py"}}.
+"""
 import csv
 from html import escape
 
 
-def manuscript(out, log):
+def build(out, run):
     def rows(name):
         with (out / (name + '.csv')).open(newline='', encoding='utf-8') as f:
             return list(csv.DictReader(f))
@@ -17,7 +20,7 @@ def manuscript(out, log):
     case = rows('连接诊断')[0]
     choice = rows('口径比较')[0]
     boundary = rows('边界记录')[0]
-    calendar = log['decisions']['延误定义']['value'] == 'calendar'
+    calendar = run['decisions']['延误定义']['value'] == 'calendar'
     definition = ('按日期比较，预计当天签收算准时' if calendar else
                   '按完整时刻比较，超过预计时刻即算晚送')
     labels = ['准时送达', '晚于预计送达']

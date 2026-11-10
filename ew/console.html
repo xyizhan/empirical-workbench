@@ -1,12 +1,45 @@
 <!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Empirical Workbench</title>
-<style>*{box-sizing:border-box}body{margin:0;background:#f4f4ee;color:#202e2b;font:16px/1.55 system-ui}header{background:#153832;color:white;padding:18px 5vw;display:flex;justify-content:space-between;align-items:center}header b{letter-spacing:.06em}main{max-width:1280px;margin:36px auto;padding:0 4vw}h1{font:500 clamp(26px,3vw,43px)/1.25 Georgia,serif;max-width:980px}section{background:white;border:1px solid #d0d9d4;padding:22px;margin:14px 0}nav{display:flex;gap:8px;flex-wrap:wrap}button{font:inherit;cursor:pointer;border:1px solid #b8c8bd;background:white;padding:7px 12px;border-radius:4px}button[aria-pressed=true]{background:#18584d;color:white}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}td,th{padding:8px 12px;text-align:left;border-bottom:1px solid #dde3df;white-space:nowrap}th{background:#edf2ed}article{overflow:auto}summary{cursor:pointer;padding:7px}small{color:#596e66}pre{white-space:pre-wrap;overflow-wrap:anywhere}.bad{color:#a2402a}a{color:#156958}</style>
-<header><b>EMPIRICAL WORKBENCH</b><span id="status"></span></header><main><h1 id="question"></h1><nav id="tabs"></nav><section id="panel"></section></main>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f4ee;color:#202e2b;font:15px/1.55 system-ui}
+header{background:#153832;color:#fff;padding:16px 5vw;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}header b{letter-spacing:.06em}
+main{max-width:1200px;margin:28px auto;padding:0 16px}h1{font:500 clamp(22px,3vw,36px)/1.3 Georgia,serif}
+nav{display:flex;gap:8px;flex-wrap:wrap}button{font:inherit;cursor:pointer;border:1px solid #b8c8bd;background:#fff;padding:6px 12px;border-radius:4px}button[aria-pressed=true]{background:#18584d;color:#fff}
+section{background:#fff;border:1px solid #d0d9d4;padding:18px;margin:14px 0;overflow:auto}
+table{border-collapse:collapse;font-variant-numeric:tabular-nums}td,th{padding:6px 10px;text-align:left;border-bottom:1px solid #dde3df;white-space:nowrap}th{background:#edf2ed}
+summary{cursor:pointer;padding:6px 0;font-weight:600}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f6f7f3;padding:8px}small,.muted{color:#596e66}
+.bad{color:#a2402a}.warn{color:#9a6b00}.ok{color:#18584d}ul{margin:4px 0 10px;padding-left:20px}
+</style>
+<header><b>EMPIRICAL WORKBENCH</b><span id="status"></span></header>
+<main><h1 id="question"></h1><p id="meta" class="muted"></p><nav id="tabs"></nav><section id="panel"></section></main>
 <script type="application/json" id="data">__PAYLOAD__</script><script>
-const {run,tables}=JSON.parse(data.textContent);const el=(tag,text,parent)=>{const n=document.createElement(tag);n.textContent=text;parent.append(n);return n};
-const statusLabel=document.getElementById('status');statusLabel.textContent=run.status==='passed'?'✓ 已通过核验':'● 等待处理';question.textContent=run.question||'研究运行记录';
-function draw(tab){panel.replaceChildren();for(const b of tabs.children)b.setAttribute('aria-pressed',b.textContent===tab);
-if(tab==='执行轨迹'){for(const stage of run.stages||[]){let d=el('details','',panel);d.open=true;el('summary',stage,d);for(const a of run.attempts.filter(x=>x.stage===stage)){let p=el('p',(a.outcome==='accepted'?'✓ 采用　':'↶ 回溯　')+a.plan,d);if(a.reason){p.className='bad';el('pre',a.reason,d)}}}if(run.reason)el('pre',run.reason,panel)}
-if(tab==='数据与核验'){for(const [k,v] of Object.entries(run.sources)){let d=el('details','',panel);el('summary',k+'　'+v.rows.toLocaleString()+' 行',d);el('pre',v.file+'\nSHA256 '+v.sha256,d)}for(const c of run.checks)el('div',(c.passed?'✓ ':'× ')+c.name,panel)}
-if(tab==='探索与底表'){const groups=tables['探索对照.csv'];if(groups){el('h2','样本和指标改变后，评分差怎样变化？',panel);const labels={A:'全部评分样本',B:'固定为送达后有评价的样本',C:'同一批订单，仅用送达后评分'};for(const [k,label] of Object.entries(labels)){const rows=groups.slice(1).filter(r=>r[0]===k);if(rows.length===2){const gap=Number(rows[0][3])-Number(rows[1][3]);el('div',label+'　'+gap.toFixed(3)+' 分',panel);const bar=el('div','',panel);bar.style.cssText='height:10px;background:#217669;margin:5px 0 16px;width:'+Math.min(100,Math.abs(gap)*25)+'%'}}}const select=el('select','',panel);for(const k of Object.keys(tables).sort((a,b)=>Number(b.includes('探索'))-Number(a.includes('探索'))))el('option',k,select);const area=el('article','',panel);function show(){area.replaceChildren();let rows=tables[select.value]||[];const table=el('table','',area);rows.forEach((r,i)=>{let tr=el('tr','',table);r.forEach(x=>el(i?'td':'th',x,tr))});el('small','显示前 50 行　',area);if(select.value){let a=el('a','打开完整 CSV',area);a.href=encodeURIComponent(select.value)}}select.onchange=show;show()}}
-for(const name of ['执行轨迹','数据与核验','探索与底表'])el('button',name,tabs).onclick=()=>draw(name);draw('执行轨迹');
+const {run,tables}=JSON.parse(document.getElementById('data').textContent);
+const el=(tag,text,parent,cls)=>{const n=document.createElement(tag);if(text!=null)n.textContent=text;if(cls)n.className=cls;parent&&parent.append(n);return n};
+const STATUS={passed:'✓ 已通过核验',failed:'× 运行失败',needs_decision:'◆ 待研究者决定',interrupted:'已中断',running:'运行中'};
+const MARK={passed:'✓',failed:'×',needs_decision:'◆',running:'…',pending:'·'};
+const fmt=n=>n==null?'?':Number(n).toLocaleString();
+document.getElementById('status').textContent=STATUS[run.status]||run.status;
+document.getElementById('question').textContent=run.study.question||run.study.title;
+document.getElementById('meta').textContent=[run.study.title,run.study.unit,run.started_at&&('开始于 '+run.started_at),run.duration_s!=null&&('用时 '+run.duration_s+' 秒')].filter(Boolean).join('　·　');
+function grid(columns,rows,parent){const t=el('table',null,parent);const h=el('tr',null,t);columns.forEach(c=>el('th',c,h));rows.forEach(r=>{const tr=el('tr',null,t);r.forEach(x=>el('td',x==null?'缺失':String(x),tr))});return t}
+function flow(panel){
+  if(run.reason)el('pre',run.reason,panel,'bad');
+  for(const s of run.stages){const d=el('details',null,panel);d.open=s.status!=='pending';el('summary',(MARK[s.status]||'?')+' '+s.name,d);
+    if(s.description)el('p',s.description,d,'muted');const ul=el('ul',null,d);
+    for(const a of s.attempts){if(s.attempts.length>1||a.outcome!=='accepted'){el('li',(a.outcome==='accepted'?'✓ 采用 ':'↶ 回滚 ')+a.plan,ul,a.outcome==='accepted'?'ok':'bad');if(a.reason)el('pre',a.reason,d)}
+      for(const c of a.checks)el('li',(c.passed?'✓ ':c.severity==='warn'?'! ':'× ')+c.name+(c.passed?'':'　'+fmt(c.violations)+' 行'),ul,c.passed?'':c.severity==='warn'?'warn':'bad')}
+    for(const t of s.tables)el('li',t.change==='created'?'新建 '+t.name+'　'+fmt(t.rows)+' 行':t.change==='modified'?'修改 '+t.name+'　'+fmt(t.rows_before)+' → '+fmt(t.rows)+' 行':'删除 '+t.name,ul);
+    for(const e of s.exports)el('li','导出 '+e.file+'　'+fmt(e.rows)+' 行',ul);
+    if(s.decision)el('li','口径 '+s.decision.name+' = '+s.decision.value+'（'+s.decision.source+'）',ul)}
+  for(const t of run.tools)el('p',(t.returncode===0?'✓ ':'× ')+t.label+'　→ '+t.log,panel,t.returncode===0?'ok':'bad');
+  if(run.report&&run.report.html){const a=el('a','打开报告',el('p',null,panel));a.href=run.report.html}}
+function sources(panel){grid(['表','文件','行数','SHA256'],Object.entries(run.sources).map(([k,v])=>[k,v.file,fmt(v.rows),v.sha256.slice(0,16)+'…']),panel);
+  for(const s of run.stages)for(const a of s.attempts)for(const c of a.checks)if(!c.passed&&c.examples.length){el('h3',c.name,panel);grid(c.columns,c.examples,panel)}}
+function data(panel){const names=Object.keys(tables);if(!names.length){el('p','本次运行没有导出 CSV。',panel);return}
+  const select=el('select',null,panel);names.forEach(k=>el('option',k,select));const area=el('div',null,panel);
+  const show=()=>{area.replaceChildren();const name=select.value||names[0],rows=tables[name]||[];if(rows.length)grid(rows[0],rows.slice(1),area);el('small','显示前 50 行　',area);const a=el('a','打开完整 CSV',area);a.href=encodeURIComponent(name)};
+  select.onchange=show;show()}
+const views={'流程':flow,'来源与核验':sources,'导出表':data};
+const tabs=document.getElementById('tabs'),panel=document.getElementById('panel');
+function draw(name){panel.replaceChildren();for(const b of tabs.children)b.setAttribute('aria-pressed',b.textContent===name);views[name](panel)}
+for(const name of Object.keys(views))el('button',name,tabs).onclick=()=>draw(name);draw('流程');
 </script></html>

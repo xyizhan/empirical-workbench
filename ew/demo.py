@@ -6,6 +6,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from .record import EVENTS, Interrupted
+
+SHOWN = ('source.load', 'source.loaded', 'plan.start', 'tool.start', 'tool.end', 'decision.made')
+
 
 def keypress():
     if sys.platform == "win32":
@@ -42,22 +46,24 @@ class Classroom:
             self.console.print(f'第 {self.position+1}/{len(labels)} 步　{labels[self.position]}',style='bold green')
         self.console.rule(style='cyan')
 
-    def event(self, kind, message):
-        if kind == '阶段':
+    def event(self, event):
+        kind, message = event['kind'], event['message']
+        if kind == 'stage.start':
             self.position = self.names.index(message)
             self.sql = []
             self.notes = []
             self.header()
-        if kind == 'SQLite':
+        if kind == 'sql':
             self.sql.append(message)
-        elif kind == '通过':
+        elif kind == 'check.pass':
             self.notes.append(message)
-        elif kind in ('读取','已读取','执行方案','调用工具','工具结果','报告完成','采用口径'):
-            if kind == '执行方案' and message == 'main':
+        elif kind in SHOWN:
+            data = event.get('data', {})
+            if kind == 'plan.start' and data.get('candidates') == 1:
                 return
-            if kind == '调用工具' and 'verify.py' in message:
-                message = 'Python · 从原始 CSV 独立复算'
-            self.console.print(Text(f'{kind}   {message}',style='green' if kind=='工具结果' else 'cyan'))
+            if kind == 'tool.start':
+                message = data.get('label', message)
+            self.console.print(Text(f'{EVENTS[kind]}   {message}',style='green' if kind=='tool.end' else 'cyan'))
 
     def present(self, title, blocks, details=(), hint='继续执行'):
         mode = ''
@@ -75,7 +81,7 @@ class Classroom:
             if key in (' ', '\r', '\n'):
                 break
             if key in ('q','\x03','\x04',''):
-                raise ValueError('讲者结束了现场运行')
+                raise Interrupted('讲者结束了现场运行')
             mode = '' if mode == key else key
 
     def intro(self):
@@ -120,7 +126,7 @@ class Classroom:
                 cursor=db.execute(sql)
                 rows=cursor.fetchmany(12)
                 columns=[col[0] for col in cursor.description]
-                self.emit('展示证据',dict(stage=stage['name'],title=page['title'],sql=sql,columns=columns,rows=rows))
+                self.emit('evidence',page['title'],sql=sql,columns=columns,rows=rows)
                 if query.get('explain') and rows:
                     sentence=query['explain'].format_map(dict(zip(columns,rows[0])))
                     blocks.extend([Text(''),Text(sentence,style='bold green')])

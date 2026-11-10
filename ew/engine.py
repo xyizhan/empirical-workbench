@@ -1,120 +1,187 @@
-"""Run a trusted local study specification on CSV inputs, with SQLite and Python 3."""
-import argparse
+"""Execute a normalized study specification on local CSV sources with SQLite.
+
+The engine only executes and records: it fills the stage entries of the run record and
+emits events. Display, prompting and presentation happen in callbacks supplied by the CLI.
+"""
 import csv
 import gzip
-import hashlib
-import json
-import re
 import sqlite3
-import sys
-from pathlib import Path
+import time
+
+from .record import DecisionRequired, sha256
+from .study import ident
+
+EXAMPLES = 5
 
 
-def ident(name):
-    if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', name):
-        raise ValueError(f"Invalid SQL identifier {name!r}")
-    return '"' + name + '"'
+class CheckFailed(ValueError):
+    def __init__(self, result):
+        self.result = result
+        example = f'，例如 {result["examples"][0]}' if result['examples'] else ''
+        super().__init__(f'{result["name"]}：{result["violations"]:,} 行违规{example}')
 
 
-def dump(path, value):
-    path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-
-
-def load_inputs(db, spec, raw, log, emit):
+def load_sources(db, spec, raw, run, emit):
     for table, source in spec['sources'].items():
         path = raw / source['file']
-        emit('读取', path.name)
+        emit('source.load', path.name, table=table)
+        columns = source['columns']
         with path.open(encoding='utf-8-sig', newline='') as stream:
             reader = csv.DictReader(stream)
-            columns = source['columns']
-            if set(columns) - set(reader.fieldnames or []):
-                raise ValueError(f'{table}: missing required columns')
+            missing = set(columns) - set(reader.fieldnames or [])
+            if missing:
+                raise ValueError(f'{table}：{path.name} 缺少字段 {", ".join(sorted(missing))}')
             db.execute(f'CREATE TABLE {ident(table)} ({",".join(map(ident, columns))})')
             markers = ','.join('?' for _ in columns)
             db.executemany(f'INSERT INTO {ident(table)} VALUES ({markers})',
                            (tuple(row[c] or None for c in columns) for row in reader))
-        log['sources'][table] = dict(file=path.name, sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
-                                     rows=db.execute(f'SELECT count(*) FROM {ident(table)}').fetchone()[0])
-        emit('已读取', f"{table} · {log['sources'][table]['rows']:,} 行")
+        rows = db.execute(f'SELECT count(*) FROM {ident(table)}').fetchone()[0]
+        run['sources'][table] = dict(file=path.name, sha256=sha256(path), rows=rows, columns=columns)
+        emit('source.loaded', f'{table} · {rows:,} 行', table=table, rows=rows)
 
 
-def run(args, emit=lambda kind, message: None, choose=None, checkpoint=None):
-    spec = json.loads(args.study.read_text())
-    out = args.out
-    out.mkdir(parents=True, exist_ok=False)
-    log = dict(status='running', study_sha256=hashlib.sha256(args.study.read_bytes()).hexdigest(),
-               sources={}, checks=[], attempts=[], completed=[], decisions=spec.get('decisions', {}))
+def snapshot(db):
+    """Row counts and columns of every table, used to report what a stage changed."""
+    tables = {}
+    for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"):
+        cursor = db.execute(f'SELECT * FROM "{name}" LIMIT 0')
+        tables[name] = dict(rows=db.execute(f'SELECT count(*) FROM "{name}"').fetchone()[0],
+                            columns=[c[0] for c in cursor.description])
+    return tables
+
+
+def table_changes(before, after):
+    changes = []
+    for name, info in after.items():
+        prev = before.get(name)
+        if prev is None:
+            changes.append(dict(name=name, change='created', **info))
+        elif prev != info:
+            changes.append(dict(name=name, change='modified', rows_before=prev['rows'], **info))
+    for name in sorted(set(before) - set(after)):
+        changes.append(dict(name=name, change='dropped', rows_before=before[name]['rows']))
+    return changes
+
+
+def run_check(db, check):
+    sql = check['sql'].strip().rstrip(';')
+    cursor = db.execute(sql)
+    examples = [list(row) for row in cursor.fetchmany(EXAMPLES)]
+    columns = [c[0] for c in cursor.description or ()]
+    violations = 0
+    if examples:
+        try:
+            violations = db.execute(f'SELECT count(*) FROM ({sql})').fetchone()[0]
+        except sqlite3.Error:
+            violations = None
+    return dict(name=check['name'], severity=check['severity'], passed=not examples,
+                violations=violations, columns=columns, examples=examples)
+
+
+def export(db, query, path):
+    cursor = db.execute(query)
+    columns = [c[0] for c in cursor.description]
+    opener = gzip.open if path.name.endswith('.gz') else open
+    rows = 0
+    with opener(path, 'wt', encoding='utf-8', newline='') as stream:
+        writer = csv.writer(stream)
+        writer.writerow(columns)
+        for row in cursor:
+            writer.writerow(row)
+            rows += 1
+    return dict(file=path.name, rows=rows, columns=columns)
+
+
+def try_plans(db, stage, record, emit, checkpoint):
+    plans = stage['candidates']
+    for plan in plans:
+        attempt = dict(plan=plan['name'], outcome=None, reason=None, checks=[], duration_s=None)
+        record['attempts'].append(attempt)
+        emit('plan.start', plan['name'], plan=plan['name'], candidates=len(plans))
+        started = time.perf_counter()
+        db.execute('SAVEPOINT candidate')
+        try:
+            for sql in plan['sql']:
+                emit('sql', sql)
+                db.execute(sql)
+            for check in stage['checks']:
+                emit('check.start', check['name'])
+                result = run_check(db, check)
+                attempt['checks'].append(result)
+                if result['passed']:
+                    emit('check.pass', check['name'])
+                elif check['severity'] == 'warn':
+                    emit('check.warn', f'{check["name"]} · {result["violations"]:,} 行', **result)
+                else:
+                    emit('check.fail', f'{check["name"]} · {result["violations"]:,} 行', **result)
+                    raise CheckFailed(result)
+        except (ValueError, sqlite3.Error) as exc:
+            if checkpoint:
+                checkpoint(db, stage, 'rejected', exc)
+            db.execute('ROLLBACK TO candidate')
+            db.execute('RELEASE candidate')
+            attempt.update(outcome='rejected', reason=str(exc), duration_s=round(time.perf_counter() - started, 3))
+            emit('plan.rollback', f'{plan["name"]} · {exc}', plan=plan['name'])
+            if plan is plans[-1]:
+                raise
+        else:
+            db.execute('RELEASE candidate')
+            attempt.update(outcome='accepted', duration_s=round(time.perf_counter() - started, 3))
+            emit('plan.accept', plan['name'], plan=plan['name'])
+            return
+
+
+def apply_decision(db, spec, stage, record, emit, choose, out):
+    name = stage['decision']
+    decision = spec['decisions'][name]
+    if choose:
+        decision['value'] = choose(name, decision, out)
+    value = decision['value']
+    record['decision'] = dict(name=name, value=value, source=decision.get('source', 'default'))
+    if value not in decision['options']:
+        raise DecisionRequired(f'待研究者确定口径「{name}」；可选 {", ".join(decision["options"])}，证据见本次输出')
+    emit('decision.made', f'{name} = {value}', name=name, value=value, source=record['decision']['source'])
+    db.execute('CREATE TABLE decision(value TEXT)')
+    db.execute('INSERT INTO decision VALUES (?)', (value,))
+
+
+def run(spec, raw, out, run_record, emit, choose=None, checkpoint=None, on_stage_end=None):
+    """Run every stage, filling run_record['sources'] and run_record['stages'] in place.
+
+    Raises on the first stage that cannot complete; the failing stage is marked
+    'failed' (or 'needs_decision') and later stages stay 'pending'.
+    """
     db = sqlite3.connect(':memory:')
     try:
-        load_inputs(db, spec, args.raw, log, emit)
-        for stage in spec['stages']:
-            log['current'] = stage['name']
-            emit('阶段', stage['name'])
-            plans = stage.get('candidates') or [{'name': 'main', 'sql': stage.get('sql', [])}]
-            for plan in plans:
-                emit('执行方案', plan['name'])
-                db.execute('SAVEPOINT candidate')
-                checks = []
-                try:
-                    for sql in plan['sql']:
-                        emit('SQLite', sql)
-                        db.execute(sql)
-                    for name, query in stage.get('checks', {}).items():
-                        emit('核验', name)
-                        invalid = db.execute(query).fetchmany(5)
-                        checks.append(dict(name=name, passed=not invalid, examples=invalid))
-                        if invalid:
-                            raise ValueError(f'{name}: {invalid}')
-                        emit('通过', name)
-                except (ValueError, sqlite3.Error) as exc:
-                    if checkpoint:
-                        checkpoint(db, stage, 'rejected', exc)
-                    db.execute('ROLLBACK TO candidate')
-                    db.execute('RELEASE candidate')
-                    emit('已回滚', f"{plan['name']} · {exc}")
-                    log['attempts'].append(dict(stage=stage['name'], plan=plan['name'], outcome='rejected', reason=str(exc), checks=checks))
-                    if plan is plans[-1]:
-                        log['checks'].extend(checks)
-                        raise
-                else:
-                    db.execute('RELEASE candidate')
-                    log['attempts'].append(dict(stage=stage['name'], plan=plan['name'], outcome='accepted'))
-                    log['checks'].extend(checks)
-                    break
-            for name, query in stage.get('exports', {}).items():
-                emit('生成', name)
-                cursor = db.execute(query)
-                opener = gzip.open if name.endswith('.gz') else open
-                with opener(out/name, 'wt', encoding='utf-8', newline='') as stream:
-                    writer = csv.writer(stream)
-                    writer.writerow([col[0] for col in cursor.description])
-                    writer.writerows(cursor)
-            if checkpoint:
-                checkpoint(db, stage, 'done')
-            if 'decision' in stage:
-                name = stage['decision']
-                value = spec['decisions'][name]['value']
-                decision = spec['decisions'][name]
-                if choose:
-                    value = choose(name, decision, out)
-                    decision['value'] = value
-                emit('采用口径', f'{name} = {value}')
-                if value not in spec['decisions'][name]['options']:
-                    raise ValueError(f'待研究者确定 {name}；见本次输出的口径比较表')
-                db.execute('CREATE TABLE decision(value TEXT)')
-                db.execute('INSERT INTO decision VALUES (?)', (value,))
-            log['completed'].append(stage['name'])
-        log['status'] = 'passed'
-    except Exception as error:
-        log.update(status='stopped', reason=str(error))
-        raise
+        load_sources(db, spec, raw, run_record, emit)
+        for stage, record in zip(spec['stages'], run_record['stages']):
+            started = time.perf_counter()
+            record['status'] = 'running'
+            emit('stage.start', stage['name'])
+            before = snapshot(db)
+            try:
+                try_plans(db, stage, record, emit, checkpoint)
+                for name, query in stage['exports'].items():
+                    emit('export', name)
+                    record['exports'].append(export(db, query, out / name))
+                if checkpoint:
+                    checkpoint(db, stage, 'done')
+                if 'decision' in stage:
+                    apply_decision(db, spec, stage, record, emit, choose, out)
+            except DecisionRequired:
+                record['status'] = 'needs_decision'
+                raise
+            except BaseException:
+                record['status'] = 'failed'
+                raise
+            finally:
+                record['tables'] = table_changes(before, snapshot(db))
+                record['duration_s'] = round(time.perf_counter() - started, 3)
+                if on_stage_end:
+                    on_stage_end()
+            record['status'] = 'passed'
+            emit('stage.end', stage['name'], tables=len(record['tables']), exports=len(record['exports']))
+            if on_stage_end:
+                on_stage_end()
     finally:
-        dump(out/'run.json', log)
         db.close()
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description=__doc__)
-    for name in ['study', 'raw', 'out']:
-        parser.add_argument('--'+name, required=True, type=Path)
-    run(parser.parse_args())
