@@ -11,6 +11,7 @@ import webbrowser
 from pathlib import Path
 from types import SimpleNamespace
 from . import engine
+from .terminal import show_run
 
 
 def save(path, obj):
@@ -45,7 +46,10 @@ def report(out):
             lines.extend('| '+' | '.join(x.replace('|','\\|').replace('\n',' ') for x in row)+' |' for row in rows)
             lines.append('')
     (out/'report.qmd').write_text('\n'.join(lines))
-    subprocess.run([os.environ.get('QUARTO_BIN','quarto'),'render','report.qmd'],cwd=out,check=True)
+    binary=shutil.which(os.environ.get('QUARTO_BIN','quarto'))
+    if not binary:
+        sys.exit('生成报告需要 Quarto CLI。请安装或设置 QUARTO_BIN 指向可执行文件。')
+    subprocess.run([str(Path(binary).resolve()),'render','report.qmd'],cwd=out,check=True)
 
 
 def main():
@@ -59,7 +63,10 @@ def main():
     run.add_argument('--out',required=True,type=Path)
     run.add_argument('--decision',action='append',default=[],metavar='KEY=VALUE')
     for name in ['view','report']:
-        cmds.add_parser(name).add_argument('out',type=Path)
+        sub=cmds.add_parser(name)
+        sub.add_argument('out',type=Path)
+        if name=='view':
+            sub.add_argument('--web',action='store_true')
     args=parser.parse_args()
     if args.cmd=='inspect':
         profile={}
@@ -81,8 +88,11 @@ def main():
         report(out)
         return
     if args.cmd=='view':
-        dashboard(out)
-        webbrowser.open((out/'index.html').as_uri())
+        if args.web:
+            dashboard(out)
+            webbrowser.open((out/'index.html').as_uri())
+        else:
+            show_run(out)
         return
     study=args.study.resolve()
     spec=json.loads(study.read_text())
@@ -111,7 +121,7 @@ def main():
     if error: log.update(status='stopped',reason=error)
     save(out/'run.json',log)
     dashboard(out)
-    print(out/'index.html')
+    print(f'运行记录：{out}（ew view 查看）')
     if error: sys.exit(error)
 
 if __name__=='__main__':

@@ -1,6 +1,6 @@
 # Empirical Workbench
 
-一个本地运行的实证数据工作台。通过 CLI 或配套 Agent Skill 读取原始 CSV，在 SQLite 中执行候选变换与核验，生成分析数据、独立可打开的中文交互控制台和 Quarto 报告。
+一个本地运行的实证数据工作台。通过 CLI 或配套 Agent Skill 读取原始 CSV，在 SQLite 中执行候选变换与核验，生成分析数据、中文终端交互控制台和 Quarto 报告。
 
 ## 五分钟运行
 
@@ -15,7 +15,7 @@ ew run studies/panel/study.json --raw studies/panel --out runs/panel
 ew view runs/panel
 ```
 
-内置八行企业面板检验复合键、年度断档和零基期。两条可计算增长率分别为 +10%、−20%。浏览器控制台按执行轨迹、数据核验和探索底表组织，每次运行均可离线回看。
+内置八行企业面板检验复合键、年度断档和零基期。两条可计算增长率分别为 +10%、−20%。终端控制台按 1/2/3 切换执行轨迹、数据核验和探索底表，按 q 退出。可用 ew view RUN --web 打开网页视图，每次运行均可离线回看。
 
 ## Olist 演示
 
@@ -27,7 +27,7 @@ ew view runs/olist
 ew report runs/olist
 ```
 
-最后一条通过 Quarto CLI 生成 report.qmd 和独立 report.html。将 quarto 加入 PATH，或用 QUARTO_BIN 指定其可执行文件。运行目录同时保存完整压缩分析表、来源哈希、逐项检查和独立复算日志。浏览器「探索与底表」展示评分差的三步对照。
+最后一条通过 Quarto CLI 生成 report.qmd 和独立 report.html。将 quarto 加入 PATH，或用 QUARTO_BIN 指定其可执行文件。运行目录同时保存完整压缩分析表、来源哈希、逐项检查和独立复算日志。网页视图「探索与底表」展示评分差的三步对照。
 
 在新目录中以 `--decision '延误定义=clock'` 比较完整时点口径。指定空值 `--decision '延误定义='` 会在生成影响统计后暂停并以非零退出，控制台仍可回看。选择后用新目录重建。
 
