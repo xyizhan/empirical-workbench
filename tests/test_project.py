@@ -152,3 +152,33 @@ class AgentTest(ProjectCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class LLMClientTest(unittest.TestCase):
+    def test_retries_truncated_response(self):
+        import http.client
+        from unittest import mock
+        from ew import llm
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return json.dumps({'choices': [{'message': {'role': 'assistant', 'content': '好'}}]}).encode()
+
+        calls = [http.client.IncompleteRead(b''), Response()]
+
+        def urlopen(request, timeout):
+            item = calls.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        with mock.patch.object(llm.urllib.request, 'urlopen', urlopen), mock.patch.object(llm.time, 'sleep', lambda s: None):
+            message = llm.Client(api_key='test').chat([{'role': 'user', 'content': 'hi'}])
+        self.assertEqual(message['content'], '好')
+        self.assertEqual(calls, [])

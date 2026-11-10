@@ -5,6 +5,7 @@ Configuration comes from the environment only (keys are never written to disk):
   EW_LLM_BASE_URL  default https://api.deepseek.com  (e.g. https://api.openai.com/v1, http://localhost:11434/v1)
   EW_LLM_MODEL     default deepseek-v4-pro
 """
+import http.client
 import json
 import os
 import time
@@ -47,7 +48,8 @@ class Client:
                     time.sleep(2 ** attempt)
                     continue
                 raise LLMError(f'大模型接口返回 HTTP {exc.code}：{detail}') from None
-            except (urllib.error.URLError, TimeoutError) as exc:
+            except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException, json.JSONDecodeError, KeyError) as exc:
+                # includes responses cut off mid-stream (IncompleteRead) on long generations
                 if attempt < 3:
                     time.sleep(2 ** attempt)
                     continue

@@ -388,7 +388,10 @@ class Chat:
                 if text == '/state':
                     self.console.print_json(json.dumps(project.state(self.root), ensure_ascii=False, default=str))
                     continue
-                self.reply(text)
+                try:
+                    self.reply(text)
+                except LLMError as exc:  # keep the conversation; the researcher can retry with 继续
+                    self.console.print(f'大模型调用失败：{exc}\n对话已保存，可以输入「继续」重试。', style='red')
         except (EOFError, KeyboardInterrupt):
             pass
         except LLMError as exc:
