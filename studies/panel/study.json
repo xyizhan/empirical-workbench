@@ -1,0 +1,58 @@
+{
+  "sources": {
+    "raw": {
+      "file": "panel.csv",
+      "columns": [
+        "firm",
+        "year",
+        "revenue"
+      ]
+    }
+  },
+  "stages": [
+    {
+      "name": "1 识别企业年度",
+      "sql": [],
+      "checks": {
+        "检查复合键": "select firm,year from raw group by firm,year having count(*)!=1 or firm is null or year is null"
+      },
+      "exports": {}
+    },
+    {
+      "name": "2 匹配相邻年度",
+      "sql": [
+        "create table base as select a.*,b.revenue prior from raw a left join raw b on a.firm=b.firm and cast(b.year as integer)=cast(a.year as integer)-1"
+      ],
+      "checks": {
+        "行数一致": "select count(*) from base having count(*)!=(select count(*) from raw)"
+      },
+      "exports": {}
+    },
+    {
+      "name": "3 判定基期可用性",
+      "sql": [
+        "create table qc as select *,case when prior is null then '上年无记录' when prior*1.0=0 then '上年收入为零' else '可算' end reason from base"
+      ],
+      "checks": {},
+      "exports": {}
+    },
+    {
+      "name": "4 构造增长率和样本",
+      "sql": [
+        "create table analysis as select *,case when reason='可算' then 1.0*revenue/prior-1 end growth from qc"
+      ],
+      "checks": {},
+      "exports": {
+        "分析表.csv": "select * from analysis order by firm,year"
+      }
+    },
+    {
+      "name": "5 描述增长分布",
+      "sql": [],
+      "checks": {},
+      "exports": {
+        "增长统计.csv": "select count(growth) n, round(avg(growth)*100,6) mean_percent from analysis"
+      }
+    }
+  ]
+}
