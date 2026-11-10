@@ -13,6 +13,8 @@ from pathlib import Path
 import duckdb
 
 from . import __version__, engine, io, record, report, study as studies
+from . import project
+from .profile import profile_table
 from .record import EVENTS, DecisionRequired, Interrupted, Recorder
 from .terminal import show_run
 
@@ -82,8 +84,25 @@ def run_tools(spec, study_dir, raw, out, run, emit, save):
 
 
 def cmd_run(args, parser):
-    study_path = args.study.resolve()
-    spec = studies.load(study_path)
+    raw = args.raw
+    if project.is_project(args.study):
+        root = args.study.resolve()
+        try:
+            if args.topic:
+                spec, study_path = project.topic_spec(root, args.topic, args.base)
+            else:
+                spec, study_path = project.base_spec(root)
+        except project.ProjectError as exc:
+            parser.error(str(exc))
+        raw = raw or project.raw_dir(root)
+        args.out = args.out or project.new_out(root, args.topic or 'base')
+    else:
+        if args.topic or args.base:
+            parser.error('--topic / --base 只用于研究项目目录')
+        if not raw or not args.out:
+            parser.error('运行单个研究配置需要 --raw 和 --out')
+        study_path = args.study.resolve()
+        spec = studies.load(study_path)
     explicit = set()
     for setting in args.decision:
         key, sep, value = setting.partition('=')
@@ -104,7 +123,7 @@ def cmd_run(args, parser):
     record.save_json(out / 'study.json', spec)
 
     interactive = sys.stdin.isatty() if args.interactive is None else args.interactive
-    run = record.new_run(study_path, spec, args.raw.resolve())
+    run = record.new_run(study_path, spec, Path(raw).resolve())
     recorder = Recorder(out, run)
     presenter = None
     if classroom:
@@ -126,10 +145,10 @@ def cmd_run(args, parser):
         if presenter:
             presenter.intro()
         recorder.emit('run.start', spec.get('question') or run['study']['title'])
-        engine.run(spec, args.raw, out, run, recorder.emit, choose,
+        engine.run(spec, Path(raw), out, run, recorder.emit, choose,
                    presenter.checkpoint if presenter else None, recorder.save)
         recorder.save()
-        run_tools(spec, study_path.parent, args.raw, out, run, recorder.emit, recorder.save)
+        run_tools(spec, study_path.parent, Path(raw), out, run, recorder.emit, recorder.save)
     except DecisionRequired as exc:
         status, reason = record.NEEDS_DECISION, str(exc)
     except (Interrupted, KeyboardInterrupt) as exc:
@@ -149,30 +168,6 @@ def cmd_run(args, parser):
         dashboard(out)
     if presenter:
         presenter.finish(out)
-
-
-def profile_table(db, table):
-    """Column profile of a loaded table: type, missing share, distinct values, range, hints."""
-    rows = db.execute(f'SELECT count(*) FROM {io.ident(table)}').fetchone()[0]
-    columns = []
-    for name, ctype, lo, hi, distinct, null_pct in db.execute(
-            f'SELECT column_name, column_type, min, max, approx_unique, null_percentage FROM (SUMMARIZE {io.ident(table)})').fetchall():
-        col = io.ident(name)
-        missing = db.execute(f'SELECT count(*) - count({col}) FROM {io.ident(table)}').fetchone()[0]
-        hints = []
-        if missing == 0 and rows and db.execute(f'SELECT count(DISTINCT {col}) FROM {io.ident(table)}').fetchone()[0] == rows:
-            hints.append('候选主键')
-        if ctype == 'VARCHAR' and rows:
-            zeros, numeric, filled = db.execute(
-                f"SELECT count_if(regexp_full_match({col}, '0[0-9]+')), count(TRY_CAST(replace({col}, ',', '') AS DOUBLE)), count({col}) "
-                f'FROM {io.ident(table)}').fetchone()
-            if zeros:
-                hints.append('含前导零代码，应保持文本')
-            elif filled and numeric == filled:
-                hints.append('疑似数值被读成文本')
-        columns.append(dict(name=name, type=ctype, missing=missing, missing_share=round(missing / rows, 4) if rows else 0,
-                            distinct=distinct, min=lo, max=hi, hints=hints))
-    return dict(rows=rows, columns=columns)
 
 
 def cmd_inspect(args):
@@ -253,15 +248,22 @@ def main(argv=None):
     validate = cmds.add_parser('validate', help='检查研究配置，不读取数据')
     validate.add_argument('study', type=Path)
     run = cmds.add_parser('run', aliases=['demo'], help='执行研究（demo 为课堂投影模式）')
-    run.add_argument('study', type=Path)
-    run.add_argument('--raw', required=True, type=Path)
-    run.add_argument('--out', required=True, type=Path)
+    run.add_argument('study', type=Path, help='研究配置 study.json，或研究项目目录')
+    run.add_argument('--raw', type=Path, help='原始数据目录（研究项目自动使用项目登记的目录）')
+    run.add_argument('--out', type=Path, help='新的输出目录（研究项目自动放在 runs/ 下）')
+    run.add_argument('--topic', help='研究项目中要运行的选题；省略则运行数据底座')
+    run.add_argument('--base', type=Path, help='选题使用的底座运行目录；默认最近一次通过的底座')
     run.add_argument('--decision', action='append', default=[], metavar='KEY=VALUE')
     mode = run.add_mutually_exclusive_group()
     mode.add_argument('--interactive', dest='interactive', action='store_true')
     mode.add_argument('--batch', dest='interactive', action='store_false')
     run.set_defaults(interactive=None)
     run.add_argument('--report', action='store_true', help='核验后生成报告（需要 Quarto）')
+    chat = cmds.add_parser('chat', help='与研究助理一起理解数据、确定选题并完成处理')
+    chat.add_argument('project', type=Path, help='研究项目目录（不存在时用 --raw 新建）')
+    chat.add_argument('--raw', type=Path, help='新建项目时的原始数据目录')
+    chat.add_argument('--name', help='新建项目的名称（默认取目录名）')
+    chat.add_argument('--new', action='store_true', help='忽略已保存的对话，重新开始')
     serve = cmds.add_parser('serve', help='启动本地网页工作台')
     serve.add_argument('--runs', type=Path, default=Path('runs'), help='运行目录（默认 runs）')
     serve.add_argument('--studies', type=Path, default=Path('studies'), help='研究配置目录（默认 studies）')
@@ -278,6 +280,18 @@ def main(argv=None):
     try:
         if args.cmd == 'inspect':
             cmd_inspect(args)
+        elif args.cmd == 'chat':
+            from .agent import Chat
+            from .llm import LLMError
+            if not project.is_project(args.project):
+                if not args.raw:
+                    parser.error(f'{args.project} 还不是研究项目；新建请加 --raw 原始数据目录')
+                project.create(args.project, args.raw, args.name)
+                print(f'已新建研究项目：{args.project.resolve()}')
+            try:
+                Chat(args.project.resolve()).loop(fresh=args.new)
+            except LLMError as exc:
+                sys.exit(str(exc))
         elif args.cmd == 'serve':
             from .server import serve as start_server
             start_server(args.runs, args.studies, args.port, args.open)
@@ -304,7 +318,7 @@ def main(argv=None):
             print(path)
     except studies.StudyError as exc:
         sys.exit(str(exc))
-    except (ValueError, FileNotFoundError, RuntimeError, duckdb.Error, subprocess.CalledProcessError) as exc:
+    except (ValueError, FileNotFoundError, RuntimeError, duckdb.Error, subprocess.CalledProcessError) as exc:  # includes ProjectError
         sys.exit(f'ew {args.cmd}：{exc}')
 
 

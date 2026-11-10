@@ -35,6 +35,8 @@ class ServerTest(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        for job in cls.bench.jobs.values():
+            job['proc'].wait(timeout=60)
         cls.httpd.shutdown()
         cls.httpd.server_close()
         cls.tmp.cleanup()

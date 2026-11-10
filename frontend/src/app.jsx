@@ -72,7 +72,7 @@ export function App() {
           ))}
           {!runs.length && <p class="muted" style={{ padding: '0 8px' }}>还没有运行记录。</p>}
         </nav>
-        {meta && <div class="muted" style={{ padding: '10px 16px', fontSize: 11.5, borderTop: '1px solid var(--border)', overflowWrap: 'anywhere' }}>运行目录 {meta.runs}</div>}
+        {meta && <div class="muted" title={meta.runs} style={{ padding: '10px 16px', fontSize: 11.5, borderTop: '1px solid var(--border)', overflowWrap: 'anywhere' }}>运行目录 …/{meta.runs.split(/[\\/]/).slice(-2).join('/')}</div>}
       </aside>
       <main class="main">
         {error && <div class="page"><div class="notice critical"><b>工作台出错</b><pre>{error}</pre></div></div>}

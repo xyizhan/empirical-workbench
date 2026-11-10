@@ -6,6 +6,7 @@ Each candidate plan runs in its own transaction and is rolled back if any SQL or
 error-severity check fails. The database is kept as OUT/run.duckdb for later queries.
 """
 import time
+from pathlib import Path
 
 import duckdb
 
@@ -27,7 +28,28 @@ def connect(path, read_only=False):
     return duckdb.connect(str(path), read_only=read_only)
 
 
+def attach_base(db, base, run, emit):
+    """Copy every table of a finished base run into this run's database (read-only source)."""
+    path = Path(base['run']) / DATABASE
+    if not path.is_file():
+        raise ValueError(f'底座运行没有工作数据库：{path}')
+    emit('source.load', f'底座 {Path(base["run"]).name}', table='base')
+    db.execute(f'ATTACH {io.quote(path)} AS ew_base (READ_ONLY)')
+    try:
+        names = [r[0] for r in db.execute("SELECT table_name FROM duckdb_tables() WHERE database_name = 'ew_base' AND schema_name = 'main' ORDER BY 1").fetchall()]
+        for name in names:
+            db.execute(f'CREATE TABLE {io.ident(name)} AS SELECT * FROM ew_base.main.{io.ident(name)}')
+            rows = db.execute(f'SELECT count(*) FROM {io.ident(name)}').fetchone()[0]
+            columns = [c[0] for c in db.execute(f'SELECT * FROM {io.ident(name)} LIMIT 0').description]
+            run['sources'][name] = dict(file=f'底座:{name}', sha256=None, rows=rows, columns=columns)
+        emit('source.loaded', f'底座 · {len(names)} 张表', table='base', rows=len(names))
+    finally:
+        db.execute('DETACH ew_base')
+
+
 def load_sources(db, spec, raw, run, emit):
+    if spec.get('base'):
+        attach_base(db, spec['base'], run, emit)
     for table, source in spec['sources'].items():
         path = raw / source['file']
         emit('source.load', path.name, table=table)

@@ -1,80 +1,148 @@
 # Empirical Workbench
 
-一个本地运行的实证数据工作台。通过 CLI 或配套 Agent Skill 读取原始 CSV，在 SQLite 中执行候选变换与核验，生成分析数据、中文终端交互控制台和 Quarto 报告。
+**和 AI 研究助理一起，把一份陌生的数据变成可核验、可复现的实证分析数据。**
 
-## 五分钟运行
+面向经济学与管理学研究者的本地工作台：AI 帮你看懂数据、做好清洗与合并，与你讨论确定选题，再完成样本筛选、变量构造与探索分析。每一步都有可回查的 SQL、核验结果和运行记录。
 
-需要 Python 3.10+。在仓库根目录运行：
+[![CI](https://github.com/xyizhan/empirical-workbench/actions/workflows/test.yml/badge.svg)](https://github.com/xyizhan/empirical-workbench/actions/workflows/test.yml)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-```sh
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-ew inspect studies/panel
-ew run studies/panel/study.json --raw studies/panel --out runs/panel
-ew view runs/panel
-```
+<p align="center"><img src="docs/assets/demo.gif" alt="Empirical Workbench 演示" width="860"></p>
+<p align="center"><a href="docs/assets/demo.mp4">▶ 观看高清演示视频（17 秒）</a></p>
 
-## 网页工作台
+## 为什么需要它
 
-```sh
-ew serve --open
-```
+拿到一份新数据（CSMAR、Wind、CNRDS 的导出，或 Kaggle 上的公开数据），真正耗时的往往不是回归，而是前面这些事：每张表一行代表什么？合并会不会让行数膨胀？缺失和异常怎么处理？哪些定义会改变结论？这些步骤散落在一次性的脚本里，过几个月连自己都说不清。
 
-在浏览器打开本地工作台（仅监听 127.0.0.1）。左侧是 runs/ 中的全部运行记录；「新建运行」选择 studies/ 中的研究、填写原始数据目录、为每个研究口径选定取值，或选择「运行到这里先暂停，看过证据再决定」。运行中页面实时显示各阶段状态与事件；暂停时页面列出口径证据，点选后以该口径在新目录重跑。每次运行可查看各阶段的候选方案、回滚原因、核验违规样例、数据表行数变化、导出文件预览与下载，在「查询」中对工作数据库执行只读 SQL，并生成或打开报告。`--runs`、`--studies`、`--port` 可改目录与端口。
+Empirical Workbench 把这些步骤变成**有证据的工作流**：
 
-前端源码在 frontend/（Vite + Preact），构建结果随 Python 包发布在 ew/web/，使用者无需安装 Node。修改前端后在 frontend/ 运行 `npm install && npm run build`；开发时 `npm run dev` 会把 /api 代理到 `ew serve` 的 8765 端口。
+| | |
+|---|---|
+| 🤖 **AI 研究助理** | `ew chat` 在终端里与你合作：先理解数据、搭建底座，再写数据档案、给出可研究方向，和你讨论确定选题 |
+| 🧱 **底座与选题分离** | 清洗、合并、对账等与选题无关的工作只做一次；同一份底座可以支撑多个选题，随时换题无需重来 |
+| 🙋 **研究者拍板** | 选题卡必须由你在终端确认后，助理才会构造变量；关键口径（如"晚到"怎么定义）运行到该处会暂停并给出证据，由你选择 |
+| ✅ **每一步都核验** | 每个阶段附带返回违规行的核验 SQL；失败的方案自动回滚并保留证据，可以看到"为什么这样合并是错的" |
+| 🔍 **全程可回查** | 每次运行保存来源文件哈希、全部 SQL、核验结果、各表行数变化、事件流和工作数据库，可随时查询任意中间表 |
+| 🖥️ **网页工作台** | `ew serve` 实时查看运行进度、阶段流程、数据规模、导出预览，在页面上做口径决策和 SQL 查询 |
+| 🇨🇳 **适配中文数据** | 自动识别 GBK 编码，证券代码等前导零保持文本；读写 CSV、Parquet、Excel、Stata `.dta` |
+| 🔓 **开放、本地** | 数据只在本地处理（DuckDB）；模型可接 DeepSeek、OpenAI 或任何兼容 OpenAI 接口的服务，包括本地 Ollama |
 
-## 命令行
+## 快速开始
 
-内置八行企业面板检验复合键、年度断档和零基期。两条可计算增长率分别为 +10%、−20%。终端控制台按 1/2/3 切换执行轨迹、数据核验和探索底表，按 q 退出。可用 ew view RUN --web 打开网页视图，每次运行均可离线回看。
-
-## 课堂投影模式
-
-在终端运行 `./demo-olist`。启动器自动建立新运行目录；也可用 `ew demo studies/olist/study.json --raw raw --out runs/talk --report`。终端建议至少 90 列、28 行。空格推进，E 展开现场查询的源行，L 展开 SQL，Q 结束；进入研究决策时输入编号后按回车。
-
-五个阶段持续显示在页首。课堂会停在四表粒度、明细连接反例、修复后对账、缺失处置、样本筛选和评分差对照。反例页在回滚前读取当前数据库；研究者选定的口径实际参与后续运算。Quarto 的渲染日志写入运行目录的 quarto.log。自定义来源用 OLIST_RAW，Quarto 可执行文件用 QUARTO_BIN。
-
-研究配置可在每个阶段添加 classroom.done 或 classroom.rejected 页面。页面声明 title、body、next 以及 tables 中的只读证据查询；detail=true 的表在 E 视图展开。展示证据随运行记录保存到 events.jsonl。
-
-## 连续执行模式
-
-在工程根目录启动，raw 指向解压后的 Olist CSV。每次使用新的输出目录。
+需要 Python 3.10+。
 
 ```sh
-ew run studies/olist/study.json --raw raw --out "runs/live-$(date +%s)" --interactive --report
+git clone https://github.com/xyizhan/empirical-workbench.git
+cd empirical-workbench
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e '.[formats]'          # formats 可选：读写 Excel 与 Stata .dta
 ```
 
-终端逐项显示读取的文件、SQLite 操作、检查结果、回滚和替代方案。第 4 阶段展示本次计算的换组数量，等待输入 1（自然日）或 2（完整时点），之后再构建主分组、调用独立复算工具及 Quarto。完整事件保存在 events.jsonl，实际选择在 run.json。交互终端默认启用提问；自动化可指定 --batch 或用 --decision 预选口径。--report 需要本地 Quarto，省略该参数仍可运行其余环节。
-
-## Olist 演示
-
-从 [Olist 发布页](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) 下载并解压 CSV 至 raw/。本仓库提供配置与代码，原始订单数据由使用者放在本地。
+### 1. 和研究助理一起处理数据
 
 ```sh
-ew run studies/olist/study.json --raw raw --out runs/olist
-ew view runs/olist
-ew report runs/olist
+export EW_LLM_API_KEY=你的密钥          # 默认使用 DeepSeek
+ew chat 我的项目 --raw 原始数据目录      # 首次新建项目；之后 ew chat 我的项目 继续上次对话
 ```
 
-最后一条通过 Quarto CLI 生成 report.qmd 和独立 report.html。将 quarto 加入 PATH，或用 QUARTO_BIN 指定其可执行文件。运行目录同时保存完整压缩分析表、来源哈希、逐项检查和独立复算日志。网页视图「探索与底表」展示评分差的三步对照。
+助理会按这个顺序推进，你可以随时打断、提问或换方向：
 
-在新目录中以 `--decision '延误定义=clock'` 比较完整时点口径。指定空值 `--decision '延误定义='` 会在生成影响统计后暂停并以非零退出，控制台仍可回看。选择后用新目录重建。
+```
+原始数据
+  │  A. 理解数据，搭建数据底座（与选题无关）
+  │     识别观察单位与主键 → 核对表间关联与匹配率 → 按正确粒度合并、对账 → 标记缺失与异常（只标记，不删除）
+  ▼
+数据档案 profile.md：数据是什么、有什么特点、可能研究什么
+  │  B. 讨论并确定选题 —— 选题卡由你确认
+  ▼
+选题 A / 选题 B / …：样本筛选 → 变量构造 → 描述统计与分组对比（关键口径由你决定）
+```
 
-## 扩展项目
+### 2. 在网页里查看和决策
 
-研究配置、运行记录与事件流的完整约定见 [docs/run-format.md](docs/run-format.md)。
+```sh
+ew serve --runs 我的项目/runs --open
+```
 
-- **新研究**复制 studies/panel，先用 `ew validate STUDY` 检查配置。sources 声明输入文件及字段；stages 的 sql、checks、exports 描述变换、违规记录查询与导出。候选方案使用 candidates 数组，每项提供 name 与 sql。SQLite 保存点隔离尝试，失败后回滚并尝试下一项，保留证据。核验可写成 `{"sql": ..., "severity": "warn"}`，只提醒不阻断。
-- **数据格式**：来源可为 CSV/TSV（自动识别 UTF-8 或 GBK 编码）、Parquet；`pip install -e '.[formats]'` 后还可读写 Excel 与 Stata .dta。导出按扩展名写出 .csv、.csv.gz、.parquet、.dta、.xlsx。SQL 使用 DuckDB 方言，字段按真实类型读入，证券代码等前导零保持文本。
-- **先看数据**：`ew inspect RAW` 列出每个字段的类型、缺失、不同值个数与范围，并提示候选主键、前导零代码、被读成文本的数值；`--json` 供 Agent 读取。
-- **查询运行结果**：每次运行在输出目录保留 run.duckdb，`ew query RUN "select ..."` 可只读查询任意中间表，支持 `--format csv|json`。
-- **运行结果**写入 run.json（格式 `ew.run/1`）：每个阶段的状态、候选方案、核验违规行数与样例、各表行数变化和导出文件。运行状态为 passed、failed、needs_decision（口径待定）或 interrupted；未通过时命令以非零退出。
-- **新工具**在 tools 中声明，例如 `{"verify": {"argv": ["{python}","{study}/verify.py","{raw}","{out}"], "label": "独立复算"}}`。参数逐项传递，调用顺序与配置一致，输出写入同名 .log，失败阻止报告发布。配置和脚本可以执行本地代码，只运行信任的项目。
-- **报告**默认生成通用表格报告；研究可在 `"report": {"builder": "report.py"}` 提供自己的 `build(out, run)`，返回 Quarto markdown，Olist 的叙事报告即为此例。`ew report RUN --source-only` 只写出 report.qmd，不需要 Quarto。
-- **AI 调度**将 skills/empirical-workbench 提供给宿主 Agent。CLI 的命令、源码、检查与日志均可独立使用；模型推理由宿主负责。Olist 内置候选连接和探索分支用于可重复教学；它们在配置中预定义。
-- **验收**运行 `python -m unittest discover -s tests` 与 `ruff check .`。本地有 Olist 数据时（`../data/raw` 或 `OLIST_RAW`）测试会额外跑通 Olist 全流程与独立复算。
+### 3. 不用 AI，也能直接用
 
-## 课堂演示顺序
+所有处理都写在可读的 JSON 配置里，可以手写、修改、交给合作者复跑：
 
-先展开第二阶段查看直接连接失去订单唯一性的证据，再查看连接诊断底表。切换探索页，观察只改变样本和只改变评分口径时的差异。最后打开 Quarto 输出与 verify.log，核对结果的来源。
+```sh
+ew inspect 原始数据目录                 # 字段类型、缺失、候选主键、前导零代码提示
+ew run 我的项目                         # 运行数据底座
+ew run 我的项目 --topic late-delivery   # 运行某个选题（使用最近一次通过的底座）
+ew query 我的项目/runs/<运行> "select * from analysis limit 20"
+```
+
+## 试一试内置示例
+
+```sh
+# 八行企业面板：复合键、年度断档、零基期
+ew run studies/panel/study.json --raw studies/panel --out runs/panel-1 --batch
+ew view runs/panel-1
+
+# 巴西 Olist 电商（需先从 Kaggle 下载 CSV 到 raw/）：订单、商品、支付、评价四表合并，
+# 演示一对多连接被核验拒绝并回滚、口径选择、独立复算和 Quarto 报告
+ew run studies/olist/study.json --raw raw --out runs/olist-1 --batch
+./demo-olist                            # 课堂投影模式：空格推进，讲者逐步讲解
+```
+
+Olist 数据：[Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)。
+
+## 命令一览
+
+| 命令 | 作用 |
+|---|---|
+| `ew chat PROJECT [--raw DIR]` | 与研究助理合作（新建或继续项目） |
+| `ew serve [--runs DIR]` | 本地网页工作台（仅监听 127.0.0.1） |
+| `ew inspect DIR\|FILE [--json]` | 原始数据画像 |
+| `ew run STUDY\|PROJECT [--topic T] [--decision K=V]` | 执行底座、选题或单个研究配置 |
+| `ew validate STUDY` | 检查配置，一次列出全部问题 |
+| `ew view RUN [--web]` | 在终端或浏览器查看运行 |
+| `ew query RUN "SQL"` | 只读查询运行结束时的工作数据库 |
+| `ew report RUN [--source-only]` | 生成 Quarto 报告（需安装 Quarto） |
+| `ew demo STUDY --raw DIR --out DIR` | 课堂投影模式 |
+
+## 模型配置
+
+只从环境变量读取，密钥不会写入任何文件：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `EW_LLM_API_KEY` | — | 也可用 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY` |
+| `EW_LLM_BASE_URL` | `https://api.deepseek.com` | 例如 `https://api.openai.com/v1`、`http://localhost:11434/v1` |
+| `EW_LLM_MODEL` | `deepseek-v4-pro` | 需支持 function calling |
+
+模型只能通过工作台提供的工具操作数据：查询是只读的，写入的配置会先经过校验，选题卡的确认只能来自你在终端的输入。
+
+## 它是怎么工作的
+
+- **配置即流程**：一个研究项目由 `base.json`（数据底座）和 `topics/*.json`（选题）组成。每个阶段写明 SQL、核验与导出；可以列出多个候选方案，失败的方案在事务中回滚，引擎尝试下一个。
+- **运行记录**：每次运行写入新目录，包含 `run.json`（格式 `ew.run/1`）、`events.jsonl`、导出文件和 `run.duckdb`。格式说明见 [docs/run-format.md](docs/run-format.md)。
+- **独立复算与报告**：研究可以注册复算脚本（`tools`），从原始文件重新计算关键结果；也可以提供自己的报告构建脚本。Olist 示例两者都有。
+- **给其他 AI Agent 用**：[skills/empirical-workbench](skills/empirical-workbench/SKILL.md) 是一份 Agent Skill，可交给 Claude、Codex 等宿主 Agent 调用同一套命令。
+
+## 开发
+
+```sh
+python -m unittest discover -s tests    # 测试（有 ../data/raw 中的 Olist 数据时会额外跑 Olist 全流程）
+ruff check .
+cd frontend && npm install && npm run build   # 修改网页前端后重新构建到 ew/web/
+```
+
+前端用 Vite + Preact，构建产物随 Python 包发布，使用者无需安装 Node。
+
+## 路线图
+
+- [ ] 常用操作模板：Stata 式合并诊断、分组缩尾、面板滞后、逐步样本筛选表
+- [ ] 网页工作台：项目视图（数据档案、选题卡）、两次运行并排对比
+- [ ] 导出复现包：处理后的数据、来源清单、等价脚本与说明
+- [ ] 在网页中与研究助理对话
+
+欢迎提交 Issue 和 Pull Request。
+
+## 许可证
+
+[MIT](LICENSE)

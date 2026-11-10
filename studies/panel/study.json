@@ -24,7 +24,7 @@
     {
       "name": "2 匹配相邻年度",
       "sql": [
-        "create table base as select a.*,b.revenue prior from raw a left join raw b on a.firm=b.firm and cast(b.year as integer)=cast(a.year as integer)-1"
+        "create table base as select a.*,b.revenue prior_revenue from raw a left join raw b on a.firm=b.firm and cast(b.year as integer)=cast(a.year as integer)-1"
       ],
       "checks": {
         "行数一致": "select count(*) from base having count(*)!=(select count(*) from raw)"
@@ -34,7 +34,7 @@
     {
       "name": "3 判定基期可用性",
       "sql": [
-        "create table qc as select *,case when prior is null then '上年无记录' when prior*1.0=0 then '上年收入为零' else '可算' end reason from base"
+        "create table qc as select *,case when prior_revenue is null then '上年无记录' when prior_revenue*1.0=0 then '上年收入为零' else '可算' end reason from base"
       ],
       "checks": {},
       "exports": {}
@@ -42,7 +42,7 @@
     {
       "name": "4 构造增长率和样本",
       "sql": [
-        "create table analysis as select *,case when reason='可算' then 1.0*revenue/prior-1 end growth from qc"
+        "create table analysis as select *,case when reason='可算' then 1.0*revenue/prior_revenue-1 end growth from qc"
       ],
       "checks": {},
       "exports": {

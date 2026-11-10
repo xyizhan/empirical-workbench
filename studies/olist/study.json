@@ -76,7 +76,7 @@
         "reviews 每条明细有主单": "select rowid,order_id from reviews where order_id is null or not exists (select 1 from orders o where o.order_id=reviews.order_id)"
       },
       "exports": {
-        "结构.csv": "select 'orders' source,count(*) source_rows,count(distinct order_id) orders from orders union all select 'items' source,count(*) source_rows,count(distinct order_id) orders from items union all select 'payments' source,count(*) source_rows,count(distinct order_id) orders from payments union all select 'reviews' source,count(*) source_rows,count(distinct order_id) orders from reviews"
+        "结构.csv": "select 'orders' source_table,count(*) source_rows,count(distinct order_id) orders from orders union all select 'items' source_table,count(*) source_rows,count(distinct order_id) orders from items union all select 'payments' source_table,count(*) source_rows,count(distinct order_id) orders from payments union all select 'reviews' source_table,count(*) source_rows,count(distinct order_id) orders from reviews"
       },
       "classroom": {
         "done": [

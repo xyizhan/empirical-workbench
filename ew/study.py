@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-STUDY_KEYS = {'title', 'question', 'unit', 'description', 'sources', 'decisions', 'stages', 'tools', 'report', 'guide'}
+STUDY_KEYS = {'title', 'question', 'unit', 'description', 'sources', 'base', 'card', 'decisions', 'stages', 'tools', 'report', 'guide'}
 STAGE_KEYS = {'name', 'description', 'sql', 'candidates', 'checks', 'exports', 'decision', 'classroom'}
 SOURCE_KEYS = {'file', 'columns', 'types', 'encoding', 'delimiter', 'sheet', 'description'}
 SEVERITIES = ('error', 'warn')
@@ -55,8 +55,10 @@ def normalize(spec, base=None, path='study.json'):
     if unknown:
         problems.append(f'未知顶层字段 {", ".join(sorted(unknown))}（可用：{", ".join(sorted(STUDY_KEYS))}）')
 
-    sources = spec.get('sources')
-    if not isinstance(sources, dict) or not sources:
+    sources = spec.setdefault('sources', {})
+    if spec.get('base') is not None and not (isinstance(spec['base'], dict) and isinstance(spec['base'].get('run'), str)):
+        problems.append('base 应为对象：{"run": 底座运行目录}')
+    if not isinstance(sources, dict) or (not sources and not spec.get('base')):
         problems.append('sources 应为非空对象：表名 → {file, columns}')
         sources = {}
     for table, source in sources.items():
@@ -86,8 +88,8 @@ def normalize(spec, base=None, path='study.json'):
         decision.setdefault('source', 'default')
 
     stages = spec.get('stages')
-    if not isinstance(stages, list) or not stages:
-        problems.append('stages 应为非空数组')
+    if not isinstance(stages, list):
+        problems.append('stages 应为数组')
         stages = []
     seen = set()
     for index, stage in enumerate(stages, 1):

@@ -49,6 +49,20 @@ Empirical Workbench 的引擎、终端与网页查看器、报告插件、复算
 - 工具参数中的 `{python}` `{study}` `{raw}` `{out}` 分别替换为当前解释器、研究目录、原始数据目录和运行目录。工具运行时 `{out}/run.json` 已包含全部阶段结果与口径（`status` 仍为 `running`）。非零退出使整次运行失败。
 - 报告插件是研究目录下的 Python 文件，定义 `build(out: Path, run: dict) -> str`，返回 Quarto markdown。未配置时使用通用表格报告。
 
+## 研究项目
+
+`ew chat` 与 `ew run 项目目录` 使用研究项目：`project.json`（名称与原始数据目录）、`base.json`（数据底座，格式同 study.json）、`profile.md`（数据档案）、`topics/<slug>.json`（选题）。选题文件：
+
+```jsonc
+{"card": {"title": "...", "question": "...", "unit": "...", "outcome": "...", "explanatory": "...",
+          "controls": "...", "sample": "...", "pending": "...", "rationale": "...",
+          "status": "draft",            // 研究者在终端确认后变为 confirmed，并记录 confirmed_at
+          "confirmed_at": null},
+ "decisions": {}, "stages": [], "tools": {}, "report": null}
+```
+
+选题运行时，引擎把最近一次通过的底座运行（或 `--base` 指定的运行）中的全部表复制为本次的来源表，run.json 的 `base.run` 记录所用底座；`sources` 中这些表的 `file` 为 `底座:<表名>`。选题卡未确认时不能运行。
+
 ## run.json
 
 ```jsonc
@@ -60,6 +74,7 @@ Empirical Workbench 的引擎、终端与网页查看器、报告插件、复算
   "started_at": "2026-11-10T01:40:00+00:00", "finished_at": "...", "duration_s": 4.7,
   "study": {"path": "...", "dir": "...", "sha256": "...", "title": "...", "question": "...", "unit": "..."},
   "raw": "/abs/path/to/raw",
+  "base": null,                // 选题运行：{"run": "底座运行目录"}
   "database": "run.duckdb",    // 运行结束时的工作数据库，可用 ew query RUN "SQL" 只读查询
   "sources": {"orders": {"file": "olist_orders_dataset.csv", "sha256": "...", "rows": 99441, "columns": ["..."],
                          "types": {"order_id": "VARCHAR", "order_purchase_timestamp": "TIMESTAMP"}, "encoding": "utf-8"}},

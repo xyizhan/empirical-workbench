@@ -330,7 +330,8 @@ export function RunView({ id, initialTab, labels, quarto, onStarted }) {
   const [reportError, setReportError] = useState(null)
   const run = detail?.run
 
-  useEffect(() => { setSelected(null); setTab(initialTab || 'stage'); setReportError(null) }, [id])
+  useEffect(() => { setSelected(null); setReportError(null) }, [id])
+  useEffect(() => { setTab(initialTab || 'stage') }, [id, initialTab])
   if (error) return <div class="page"><div class="notice critical"><b>无法读取运行</b><pre>{error}</pre></div></div>
   if (!detail) return <div class="page"><p class="muted">加载中…</p></div>
   if (!run) return <div class="page"><h1>{id}</h1><Status value="running" /><p class="muted">正在启动…</p></div>
